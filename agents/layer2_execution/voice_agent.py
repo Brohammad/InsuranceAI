@@ -37,6 +37,9 @@ from core.models import Channel, Customer, Interaction, InteractionOutcome, Lang
 from agents.layer2_execution.mock_utils import (
     mock_delivery_id, mock_outcome, mock_sentiment, mock_voice_script,
 )
+from agents.layer2_execution.language_utils import (
+    build_language_instruction, get_mock_message, build_agent_context,
+)
 
 
 # ── Output ────────────────────────────────────────────────────────────────────
@@ -58,13 +61,17 @@ class VoiceResult:
 VOICE_PROMPT = """
 You are a voice call script writer at Suraksha Life Insurance.
 
+{language_instruction}
+
 Write a natural outbound renewal call script in {language}.
 The script should sound like a real person speaking — no formal stiffness.
 Include:
-  1. Greeting + identity
+  1. Greeting + identity (use native-language greeting)
   2. Purpose (renewal due in {due_days} days, ₹{premium:,} premium)
   3. Offer to send WhatsApp payment link
   4. Graceful close
+
+{agent_context}
 
 Keep it under 90 seconds of speech (~200 words).
 Write ONLY the agent's lines, no stage directions.
@@ -143,22 +150,26 @@ class VoiceAgent:
         self, customer: Customer, policy: Policy,
         tone: str, strategy: str, days: int,
     ) -> str:
+        lang = customer.preferred_language.value
         if self.mock:
-            return mock_voice_script(
-                customer_name = customer.name,
-                policy_number = policy.policy_number,
-                premium       = policy.annual_premium,
-                due_days      = days,
-                language      = customer.preferred_language,
-                tone          = tone,
-                strategy      = strategy,
+            return get_mock_message(
+                channel   = "voice",
+                language  = lang,
+                name      = customer.name.split()[0],
+                product   = policy.product_type.value if hasattr(policy, "product_type") else "Life",
+                policy_no = policy.policy_number,
+                due_date  = str(policy.renewal_due_date),
+                premium   = f"{policy.annual_premium:,.0f}",
             )
+        agent_ctx = build_agent_context(customer.customer_id, f"voice renewal {strategy}", channel="voice")
         prompt = VOICE_PROMPT.format(
-            language     = customer.preferred_language.value,
+            language_instruction = build_language_instruction(lang, customer.name.split()[0]),
+            language     = lang,
             due_days     = days,
             premium      = policy.annual_premium,
             policy_number= policy.policy_number,
             tone         = tone,
+            agent_context= agent_ctx,
         )
         resp = self.client.models.generate_content(model=self.model, contents=prompt)
         return resp.text.strip()

@@ -29,6 +29,9 @@ from core.models import Channel, Customer, Interaction, InteractionOutcome, Lang
 from agents.layer2_execution.mock_utils import (
     mock_delivery_id, mock_outcome, mock_sentiment, mock_whatsapp_message,
 )
+from agents.layer2_execution.language_utils import (
+    build_language_instruction, get_mock_message, build_agent_context,
+)
 
 
 # ── Output ────────────────────────────────────────────────────────────────────
@@ -48,6 +51,8 @@ class WhatsAppResult:
 WA_PROMPT = """
 You are a WhatsApp communication specialist at Suraksha Life Insurance.
 
+{language_instruction}
+
 Write a personalised WhatsApp renewal message in {language}.
 Keep it concise (max 5 lines), warm, and include a clear call-to-action.
 Do NOT include markdown or HTML — plain text with emojis only.
@@ -60,6 +65,8 @@ DUE IN:   {due_days} days
 TONE:     {tone}
 STRATEGY: {strategy}
 LANGUAGE: {language}
+
+{agent_context}
 
 Write ONLY the message text, nothing else.
 """
@@ -81,18 +88,21 @@ class WhatsAppAgent:
         self, customer: Customer, policy: Policy,
         tone: str, strategy: str, days: int,
     ) -> str:
+        lang = customer.preferred_language.value
         if self.mock:
-            return mock_whatsapp_message(
-                customer_name = customer.name,
-                policy_number = policy.policy_number,
-                premium       = policy.annual_premium,
-                due_days      = days,
-                language      = customer.preferred_language,
-                tone          = tone,
-                strategy      = strategy,
+            return get_mock_message(
+                channel   = "whatsapp",
+                language  = lang,
+                name      = customer.name.split()[0],
+                product   = policy.product_type.value if hasattr(policy, "product_type") else "Life",
+                policy_no = policy.policy_number,
+                due_date  = str(policy.renewal_due_date),
+                premium   = f"{policy.annual_premium:,.0f}",
             )
 
+        agent_ctx = build_agent_context(customer.customer_id, f"whatsapp renewal {strategy}", channel="whatsapp")
         prompt = WA_PROMPT.format(
+            language_instruction = build_language_instruction(lang, customer.name.split()[0]),
             name         = customer.name,
             policy_number= policy.policy_number,
             product_type = policy.product_type.value,
@@ -100,7 +110,8 @@ class WhatsAppAgent:
             due_days     = days,
             tone         = tone,
             strategy     = strategy,
-            language     = customer.preferred_language.value,
+            language     = lang,
+            agent_context= agent_ctx,
         )
         resp = self.client.models.generate_content(model=self.model, contents=prompt)
         return resp.text.strip()

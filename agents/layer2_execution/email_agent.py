@@ -25,6 +25,9 @@ from core.models import Channel, Customer, Interaction, InteractionOutcome, Poli
 from agents.layer2_execution.mock_utils import (
     mock_delivery_id, mock_outcome, mock_sentiment, mock_email_content,
 )
+from agents.layer2_execution.language_utils import (
+    build_language_instruction, get_mock_message, build_agent_context,
+)
 
 
 # ── Output ────────────────────────────────────────────────────────────────────
@@ -45,6 +48,8 @@ class EmailResult:
 EMAIL_PROMPT = """
 You are an expert insurance renewal email writer at Suraksha Life Insurance.
 
+{language_instruction}
+
 Write a professional renewal reminder email in {language}. 
 Include subject line prefixed with "SUBJECT:" then the body.
 Use HTML formatting. Keep the email under 300 words.
@@ -58,6 +63,8 @@ DUE IN:   {due_days} days
 TONE:     {tone}
 STRATEGY: {strategy}
 LANGUAGE: {language}
+
+{agent_context}
 """
 
 
@@ -77,19 +84,33 @@ class EmailAgent:
         self, customer: Customer, policy: Policy,
         tone: str, strategy: str, days: int,
     ) -> dict[str, str]:
+        lang = customer.preferred_language.value
         if self.mock:
-            return mock_email_content(
-                customer_name = customer.name,
-                policy_number = policy.policy_number,
-                product_name  = policy.product_name,
-                premium       = policy.annual_premium,
-                sum_assured   = policy.sum_assured,
-                due_days      = days,
-                language      = customer.preferred_language,
-                strategy      = strategy,
+            first = customer.name.split()[0]
+            body = get_mock_message(
+                channel   = "email",
+                language  = lang,
+                name      = first,
+                product   = policy.product_name,
+                policy_no = policy.policy_number,
+                due_date  = str(policy.renewal_due_date),
+                premium   = f"{policy.annual_premium:,.0f}",
             )
+            subject = get_mock_message(
+                channel   = "email",
+                language  = lang,
+                name      = first,
+                product   = policy.product_name,
+                policy_no = policy.policy_number,
+                due_date  = str(policy.renewal_due_date),
+                premium   = f"{policy.annual_premium:,.0f}",
+                subject   = True,
+            )
+            return {"subject": subject, "body": body}
 
+        agent_ctx = build_agent_context(customer.customer_id, f"email renewal {strategy}", channel="email")
         prompt = EMAIL_PROMPT.format(
+            language_instruction = build_language_instruction(lang, customer.name.split()[0]),
             name         = customer.name,
             policy_number= policy.policy_number,
             product_name = policy.product_name,
@@ -98,7 +119,8 @@ class EmailAgent:
             due_days     = days,
             tone         = tone,
             strategy     = strategy,
-            language     = customer.preferred_language.value,
+            language     = lang,
+            agent_context= agent_ctx,
         )
         resp = self.client.models.generate_content(model=self.model, contents=prompt)
         text = resp.text.strip()

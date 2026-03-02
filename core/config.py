@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     twilio_auth_token:    str = Field("", alias="TWILIO_AUTH_TOKEN")
     twilio_whatsapp_from: str = Field("whatsapp:+14155238886", alias="TWILIO_WHATSAPP_FROM")
 
+    # ── Payment Gateway (Razorpay) ─────────────────────────────────────────
+    razorpay_key_id:      str = Field("", alias="RAZORPAY_KEY_ID")
+    razorpay_key_secret:  str = Field("", alias="RAZORPAY_KEY_SECRET")
+    merchant_vpa:         str = Field("suraksha.life@razorpay", alias="MERCHANT_VPA")
+
     # ── ElevenLabs (Voice TTS — eleven_multilingual_v2 supports all 9 Indian languages) ──
     elevenlabs_api_key:           str = Field("", alias="ELEVENLABS_API_KEY")
     elevenlabs_voice_hindi:       str = Field("pNInz6obpgDQGcFmaJgB", alias="ELEVENLABS_VOICE_ID_HINDI")

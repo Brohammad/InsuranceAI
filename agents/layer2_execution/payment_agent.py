@@ -3,22 +3,35 @@ agents/layer2_execution/payment_agent.py
 ──────────────────────────────────────────
 Payment Agent — Layer 2
 
-Generates payment links (UPI / web), tracks payment status,
-and signals the Orchestrator to STOP the journey when paid.
+Handles all payment modalities for policy renewal:
 
-MOCK MODE: Returns a fake payment record. Randomly marks
-           30% of policies as "paid" to test journey stop logic.
+  1. UPI Deep Link     — upi:// spec (NPCI standard), works with any UPI app
+  2. QR Code           — PNG generated via qrcode lib, base64-encoded
+  3. AutoPay / eMandate— NACH/UPI AutoPay mandate stub (Razorpay)
+  4. Net Banking       — Redirect URL for 8 major Indian banks
+  5. Payment Link      — Short web URL (pay.suraksha.in/renew/<txn>)
 
-REAL MODE: Integrates with a payment gateway (Razorpay / PayU / 
-           Paytm) to create real payment orders and webhooks.
+MOCK MODE (settings.mock_delivery = True):
+  - Generates real UPI deep links and real QR PNG (no gateway needed)
+  - 30% of check_status() calls return "paid" to exercise journey stop logic
+  - AutoPay returns a mandate ID stub
+
+REAL MODE (settings.mock_delivery = False):
+  - Razorpay order API for web payment link
+  - NPCI-spec UPI link with merchant VPA
+  - UPI AutoPay mandate via Razorpay subscriptions API
 """
 
 from __future__ import annotations
 
+import base64
+import io
 import random
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Optional
+from urllib.parse import urlencode, quote
 
 from loguru import logger
 
@@ -27,35 +40,188 @@ from core.models import Customer, Policy
 from agents.layer2_execution.mock_utils import mock_payment_link
 
 
-# ── Output ────────────────────────────────────────────────────────────────────
+# ── UPI constants ─────────────────────────────────────────────────────────────
+
+MERCHANT_VPA     = "suraksha.life@razorpay"
+MERCHANT_NAME    = "Suraksha Life Insurance"
+PAYMENT_BASE_URL = "https://pay.suraksha.in/renew"
+
+NETBANKING_URLS: dict[str, str] = {
+    "SBI":   "https://retail.onlinesbi.com/retail/login.htm",
+    "HDFC":  "https://netbanking.hdfcbank.com/netbanking/",
+    "ICICI": "https://infinity.icicibank.com/corp/AuthenticationController",
+    "AXIS":  "https://retail.axisbank.co.in/wps/portal/GB/retail-banking",
+    "KOTAK": "https://netbanking.kotak.com/knb2/",
+    "BOB":   "https://www.bobibanking.com/",
+    "PNB":   "https://www.netpnb.com/",
+    "UNION": "https://www.unionbankonline.co.in/",
+}
+
+
+# ── Output dataclasses ────────────────────────────────────────────────────────
+
+@dataclass
+class UpiDetails:
+    vpa:        str
+    amount:     float
+    txn_ref:    str
+    txn_note:   str
+    deep_link:  str
+    intent_url: str
+
+
+@dataclass
+class QrResult:
+    png_bytes: bytes
+    png_b64:   str
+    upi_link:  str
+    size_px:   int = 300
+
+
+@dataclass
+class AutoPayMandate:
+    mandate_id:    str
+    mandate_url:   str
+    amount:        float
+    frequency:     str
+    policy_number: str
+    status:        str
+    mock:          bool = True
+
+
+@dataclass
+class NetBankingLink:
+    bank_code:    str
+    bank_name:    str
+    redirect_url: str
+    txn_id:       str
+
 
 @dataclass
 class PaymentLinkResult:
-    txn_id:         str
-    upi_link:       str
-    web_link:       str
-    qr_data:        str
-    amount:         float
-    status:         str         # "pending" | "paid" | "failed" | "expired"
-    created_at:     datetime
-    mock:           bool = True
+    txn_id:        str
+    upi:           UpiDetails
+    qr:            QrResult
+    web_link:      str
+    autopay:       Optional[AutoPayMandate]
+    netbanking:    list
+    amount:        float
+    policy_number: str
+    customer_name: str
+    status:        str
+    created_at:    datetime
+    expires_at:    str
+    mock:          bool = True
 
 
 @dataclass
 class PaymentStatusResult:
     txn_id:         str
     status:         str
-    paid_at:        datetime | None
-    amount_paid:    float | None
-    payment_method: str | None  # "upi" | "card" | "netbanking" | "wallet"
+    paid_at:        Optional[datetime]
+    amount_paid:    Optional[float]
+    payment_method: Optional[str]
+    mandate_id:     Optional[str] = None
+
+
+# ── UPI deep link builder ─────────────────────────────────────────────────────
+
+def build_upi_deep_link(vpa: str, name: str, amount: float,
+                        txn_ref: str, note: str) -> str:
+    """
+    Build NPCI-compliant UPI deep link.
+    upi://pay?pa=<vpa>&pn=<name>&am=<amount>&tn=<note>&tr=<ref>&cu=INR
+    Works with PhonePe, GPay, Paytm, BHIM, Amazon Pay, etc.
+    """
+    params = {
+        "pa": vpa,
+        "pn": name,
+        "am": f"{amount:.2f}",
+        "tn": note[:50],
+        "tr": txn_ref,
+        "cu": "INR",
+    }
+    return "upi://pay?" + urlencode(params, quote_via=quote)
+
+
+# ── QR code generator ─────────────────────────────────────────────────────────
+
+def generate_qr_png(upi_link: str, size: int = 300) -> QrResult:
+    """Generate a QR code PNG from a UPI deep link. Returns bytes + base64."""
+    try:
+        import qrcode
+        from qrcode.constants import ERROR_CORRECT_L
+
+        qr = qrcode.QRCode(
+            version=1, error_correction=ERROR_CORRECT_L,
+            box_size=10, border=4,
+        )
+        qr.add_data(upi_link)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        png_bytes = buf.getvalue()
+        return QrResult(
+            png_bytes=png_bytes,
+            png_b64=base64.b64encode(png_bytes).decode(),
+            upi_link=upi_link,
+            size_px=size,
+        )
+    except ImportError:
+        logger.warning("qrcode library not found — returning stub QR")
+        stub = f"[QR_STUB:{upi_link[:40]}]".encode()
+        return QrResult(
+            png_bytes=stub,
+            png_b64=base64.b64encode(stub).decode(),
+            upi_link=upi_link,
+            size_px=size,
+        )
+
+
+# ── AutoPay mandate builder ───────────────────────────────────────────────────
+
+def build_autopay_mandate(policy_number: str, amount: float,
+                          mock: bool = True) -> AutoPayMandate:
+    """Build a UPI AutoPay / NACH eMandate stub."""
+    mandate_id = f"MND-{uuid.uuid4().hex[:10].upper()}"
+    return AutoPayMandate(
+        mandate_id=mandate_id,
+        mandate_url=f"https://pay.suraksha.in/autopay/{mandate_id}",
+        amount=amount,
+        frequency="yearly",
+        policy_number=policy_number,
+        status="pending_auth",
+        mock=mock,
+    )
+
+
+# ── Net banking links ─────────────────────────────────────────────────────────
+
+def build_netbanking_links(txn_id: str, amount: float) -> list:
+    """Build redirect links for top 8 Indian banks."""
+    links = []
+    for code, base_url in NETBANKING_URLS.items():
+        redirect = (
+            f"{base_url}?merchant=SURAKSHA_LIFE"
+            f"&txn={txn_id}&amount={amount:.0f}&currency=INR"
+        )
+        links.append(NetBankingLink(
+            bank_code=code, bank_name=code,
+            redirect_url=redirect, txn_id=txn_id,
+        ))
+    return links
 
 
 # ── Agent ─────────────────────────────────────────────────────────────────────
 
 class PaymentAgent:
-    """Generates payment links and tracks payment status."""
+    """
+    Generates and tracks all payment modalities:
+    UPI deep link, QR PNG, AutoPay mandate, net banking, web link.
+    """
 
-    MOCK_PAID_RATE = 0.30   # 30% of mock policies are "already paid"
+    MOCK_PAID_RATE = 0.30
 
     def __init__(self):
         self.mock = settings.mock_delivery
@@ -63,83 +229,171 @@ class PaymentAgent:
 
     def create_link(
         self,
-        customer: Customer,
-        policy:   Policy,
+        customer:           Customer,
+        policy:             Policy,
+        include_autopay:    bool = True,
+        include_netbanking: bool = True,
     ) -> PaymentLinkResult:
-        """Create a new payment link for a policy renewal."""
-        logger.debug(f"Creating payment link for {policy.policy_number} | ₹{policy.annual_premium:,.0f}")
+        """Create a full payment bundle (UPI + QR + AutoPay + NetBanking + Web)."""
+        logger.debug(
+            f"Creating payment bundle | {policy.policy_number} "
+            f"| Rs.{policy.annual_premium:,.0f} | customer={customer.name}"
+        )
 
-        if self.mock:
-            data = mock_payment_link(policy.policy_number, policy.annual_premium)
-            return PaymentLinkResult(
-                txn_id         = data["txn_id"],
-                upi_link       = data["upi_link"],
-                web_link       = data["web_link"],
-                qr_data        = data["qr_data"],
-                amount         = policy.annual_premium,
-                status         = "pending",
-                created_at     = datetime.now(),
-                mock           = True,
-            )
+        txn_id   = f"TXN-{uuid.uuid4().hex[:10].upper()}"
+        amount   = policy.annual_premium
+        note     = f"Renewal {policy.policy_number}"
+        web_link = f"{PAYMENT_BASE_URL}/{txn_id}"
 
-        # ── Real mode: Razorpay example ──────────────────────────────────
-        try:
-            import razorpay
-            client = razorpay.Client(auth=("YOUR_KEY_ID", "YOUR_KEY_SECRET"))
-            order = client.order.create({
-                "amount":   int(policy.annual_premium * 100),   # paise
-                "currency": "INR",
-                "receipt":  policy.policy_number,
-                "notes":    {"customer_id": customer.customer_id},
-            })
-            return PaymentLinkResult(
-                txn_id     = order["id"],
-                upi_link   = f"upi://pay?pa=renewai@razorpay&am={policy.annual_premium:.0f}&tn={order['id']}",
-                web_link   = f"https://rzp.io/i/{order['id']}",
-                qr_data    = f"[QR:{order['id']}]",
-                amount     = policy.annual_premium,
-                status     = "pending",
-                created_at = datetime.now(),
-                mock       = False,
-            )
-        except Exception as e:
-            logger.error(f"Payment gateway error: {e}")
-            data = mock_payment_link(policy.policy_number, policy.annual_premium)
-            return PaymentLinkResult(**data, amount=policy.annual_premium, status="pending",
-                                     created_at=datetime.now(), mock=True)
+        # UPI deep link
+        upi_link = build_upi_deep_link(
+            vpa=MERCHANT_VPA, name=MERCHANT_NAME,
+            amount=amount, txn_ref=txn_id, note=note,
+        )
+        upi = UpiDetails(
+            vpa=MERCHANT_VPA, amount=amount, txn_ref=txn_id,
+            txn_note=note, deep_link=upi_link, intent_url=upi_link,
+        )
+
+        # QR code (real PNG, even in mock mode — no API needed)
+        qr = generate_qr_png(upi_link)
+        _is_real_png = qr.png_bytes[:4] == b'\x89PNG'
+        logger.debug(f"QR generated | {len(qr.png_bytes)} bytes | is_real_png={_is_real_png}")
+
+        # AutoPay mandate
+        autopay = build_autopay_mandate(policy.policy_number, amount, mock=self.mock) if include_autopay else None
+
+        # Net banking redirects
+        netbanking = build_netbanking_links(txn_id, amount) if include_netbanking else []
+
+        # Real mode: create Razorpay order
+        if not self.mock:
+            rz_link = self._create_razorpay_order(customer, policy, txn_id)
+            if rz_link:
+                web_link = rz_link
+            if include_autopay and autopay:
+                autopay = self._create_real_mandate(customer, policy, txn_id, autopay)
+
+        result = PaymentLinkResult(
+            txn_id=txn_id, upi=upi, qr=qr, web_link=web_link,
+            autopay=autopay, netbanking=netbanking,
+            amount=amount, policy_number=policy.policy_number,
+            customer_name=customer.name, status="pending",
+            created_at=datetime.now(), expires_at="72 hours",
+            mock=self.mock,
+        )
+
+        logger.info(
+            f"Payment bundle | txn={txn_id} | Rs.{amount:,.0f} "
+            f"| qr={len(qr.png_bytes)}B | autopay={'yes' if autopay else 'no'} "
+            f"| banks={len(netbanking)} | mock={self.mock}"
+        )
+        return result
 
     def check_status(self, txn_id: str) -> PaymentStatusResult:
-        """
-        Poll payment status.
-        MOCK: 30% chance of returning 'paid' to simulate payment receipt.
-        """
+        """Poll payment status. Mock: 30% paid."""
         if self.mock:
-            paid = random.random() < self.MOCK_PAID_RATE
+            paid    = random.random() < self.MOCK_PAID_RATE
             methods = ["upi", "card", "netbanking", "wallet"]
             return PaymentStatusResult(
-                txn_id         = txn_id,
-                status         = "paid" if paid else "pending",
-                paid_at        = datetime.now() if paid else None,
-                amount_paid    = None,
-                payment_method = random.choice(methods) if paid else None,
+                txn_id=txn_id,
+                status="paid" if paid else "pending",
+                paid_at=datetime.now() if paid else None,
+                amount_paid=None,
+                payment_method=random.choice(methods) if paid else None,
+            )
+        try:
+            import razorpay
+            client = razorpay.Client(auth=(
+                settings.razorpay_key_id, settings.razorpay_key_secret,
+            ))
+            order = client.order.fetch(txn_id)
+            paid  = order["status"] == "paid"
+            return PaymentStatusResult(
+                txn_id=txn_id, status=order["status"],
+                paid_at=datetime.now() if paid else None,
+                amount_paid=order.get("amount_paid", 0) / 100 if paid else None,
+                payment_method=order.get("method"),
+            )
+        except Exception as e:
+            logger.error(f"Razorpay status check failed: {e}")
+            return PaymentStatusResult(
+                txn_id=txn_id, status="unknown",
+                paid_at=None, amount_paid=None, payment_method=None,
             )
 
-        # Real: query your payment gateway
-        raise NotImplementedError("Real payment status check not yet wired")
-
-    def confirm_payment(
-        self,
-        txn_id:   str,
-        customer: Customer,
-        policy:   Policy,
-    ) -> bool:
-        """
-        Called when payment webhook fires.
-        Returns True if confirmed, triggers journey stop.
-        In mock mode: just logs and returns True.
-        """
+    def confirm_payment(self, txn_id: str, customer: Customer,
+                        policy: Policy) -> bool:
+        """Called on payment webhook / polling confirmation."""
         logger.info(
-            f"Payment CONFIRMED | txn={txn_id} | {policy.policy_number} | {customer.name} "
-            f"| ₹{policy.annual_premium:,.0f} | mock={self.mock}"
+            f"PAYMENT CONFIRMED | txn={txn_id} | policy={policy.policy_number} "
+            f"| customer={customer.name} | Rs.{policy.annual_premium:,.0f} | mock={self.mock}"
         )
         return True
+
+    def get_whatsapp_message(self, result: PaymentLinkResult,
+                             language: str = "english") -> str:
+        """Format a WhatsApp-ready payment message with UPI link."""
+        from agents.layer2_execution.language_utils import get_language_config
+        cfg = get_language_config(language)
+        lines = [
+            f"*{result.customer_name}* — {result.policy_number}",
+            f"Amount: Rs.{result.amount:,.0f}",
+            f"",
+            f"Pay via UPI:",
+            f"{result.upi.deep_link}",
+            f"",
+            f"Pay online: {result.web_link}",
+        ]
+        if result.autopay:
+            lines += ["", f"AutoPay (yearly): {result.autopay.mandate_url}"]
+        lines += ["", f"Link valid for {result.expires_at}"]
+        return "\n".join(lines)
+
+    # ── Real-mode helpers ──────────────────────────────────────────────────
+
+    def _create_razorpay_order(self, customer: Customer, policy: Policy,
+                               txn_id: str) -> Optional[str]:
+        try:
+            import razorpay
+            client = razorpay.Client(auth=(
+                settings.razorpay_key_id, settings.razorpay_key_secret,
+            ))
+            order = client.order.create({
+                "amount":   int(policy.annual_premium * 100),
+                "currency": "INR",
+                "receipt":  txn_id,
+                "notes":    {"customer_id": customer.customer_id,
+                             "policy_number": policy.policy_number},
+            })
+            return f"https://rzp.io/i/{order['id']}"
+        except Exception as e:
+            logger.error(f"Razorpay order creation failed: {e}")
+            return None
+
+    def _create_real_mandate(self, customer: Customer, policy: Policy,
+                             txn_id: str, stub: AutoPayMandate) -> AutoPayMandate:
+        try:
+            import razorpay
+            client = razorpay.Client(auth=(
+                settings.razorpay_key_id, settings.razorpay_key_secret,
+            ))
+            plan = client.plan.create({
+                "period": "yearly", "interval": 1,
+                "item": {"name": f"Renewal {policy.policy_number}",
+                         "amount": int(policy.annual_premium * 100), "currency": "INR"},
+            })
+            sub = client.subscription.create({
+                "plan_id": plan["id"], "total_count": 5,
+                "customer_notify": 1,
+                "notes": {"policy_number": policy.policy_number},
+            })
+            return AutoPayMandate(
+                mandate_id=sub["id"], mandate_url=sub["short_url"],
+                amount=policy.annual_premium, frequency="yearly",
+                policy_number=policy.policy_number,
+                status="pending_auth", mock=False,
+            )
+        except Exception as e:
+            logger.error(f"Razorpay mandate creation failed: {e}")
+            return stub

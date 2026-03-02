@@ -49,13 +49,218 @@ PRIORITY_ORDER = {
     EscalationPriority.P4_LOW.value:    3,
 }
 
-# Mock agent pool
-MOCK_AGENTS = [
-    {"id": "AGT-001", "name": "Ravi Sharma",    "available": True,  "load": 0},
-    {"id": "AGT-002", "name": "Sunita Pillai",  "available": True,  "load": 1},
-    {"id": "AGT-003", "name": "Amit Desai",     "available": False, "load": 3},
-    {"id": "AGT-004", "name": "Meena Verma",    "available": True,  "load": 0},
+# ── Specialist taxonomy ────────────────────────────────────────────────────────
+# 20 specialists across 6 teams, each tagged with skills for routing
+
+SPECIALIST_TEAMS = {
+    "renewal":    "Renewal & Retention",
+    "claims":     "Claims Support",
+    "compliance": "Compliance & Grievance",
+    "tech":       "Technical & Payments",
+    "wellness":   "Customer Wellness",
+    "senior":     "Senior / Escalation",
+}
+
+# Skills used for routing:
+#   distress         — financial/emotional hardship cases
+#   mis_selling      — regulatory complaints, proposal doc review
+#   bereavement      — bereavement, compassionate cases
+#   complaint        — formal grievance, IRDAI escalation
+#   requested_human  — general human-assist, onboarding
+#   payment_query    — UPI/payment failure, mandate setup
+#   medical_query    — health-related product queries
+#   legal            — legal notice, court summons
+#   nri              — NRI / overseas customer
+#   senior_citizen   — 60+ customers needing slow-paced support
+#   high_value       — premium > ₹1 lakh, VIP treatment
+#   upsell           — cross-sell / upgrade opportunity
+
+MOCK_AGENTS: list[dict] = [
+    # ── Team: Renewal & Retention (5 agents) ──────────────────────────────
+    {
+        "id": "AGT-001", "name": "Ravi Sharma",
+        "team": "renewal", "team_name": "Renewal & Retention",
+        "skills": ["requested_human", "payment_query", "upsell"],
+        "languages": ["hi", "en"],
+        "available": True,  "load": 0, "max_load": 5,
+        "seniority": "senior",
+    },
+    {
+        "id": "AGT-002", "name": "Sunita Pillai",
+        "team": "renewal", "team_name": "Renewal & Retention",
+        "skills": ["requested_human", "upsell", "nri"],
+        "languages": ["en", "ml", "ta"],
+        "available": True,  "load": 1, "max_load": 5,
+        "seniority": "mid",
+    },
+    {
+        "id": "AGT-003", "name": "Amit Desai",
+        "team": "renewal", "team_name": "Renewal & Retention",
+        "skills": ["requested_human", "upsell", "high_value"],
+        "languages": ["gu", "hi", "en"],
+        "available": False, "load": 3, "max_load": 5,
+        "seniority": "mid",
+    },
+    {
+        "id": "AGT-004", "name": "Meena Verma",
+        "team": "renewal", "team_name": "Renewal & Retention",
+        "skills": ["requested_human", "payment_query", "senior_citizen"],
+        "languages": ["hi", "en"],
+        "available": True,  "load": 0, "max_load": 5,
+        "seniority": "junior",
+    },
+    {
+        "id": "AGT-005", "name": "Karthik Subramanian",
+        "team": "renewal", "team_name": "Renewal & Retention",
+        "skills": ["requested_human", "upsell", "high_value"],
+        "languages": ["ta", "en", "te"],
+        "available": True,  "load": 2, "max_load": 5,
+        "seniority": "mid",
+    },
+
+    # ── Team: Claims Support (4 agents) ───────────────────────────────────
+    {
+        "id": "AGT-006", "name": "Priya Nair",
+        "team": "claims", "team_name": "Claims Support",
+        "skills": ["complaint", "mis_selling", "medical_query"],
+        "languages": ["ml", "en", "hi"],
+        "available": True,  "load": 1, "max_load": 4,
+        "seniority": "senior",
+    },
+    {
+        "id": "AGT-007", "name": "Deepak Joshi",
+        "team": "claims", "team_name": "Claims Support",
+        "skills": ["complaint", "bereavement", "medical_query"],
+        "languages": ["hi", "en"],
+        "available": True,  "load": 0, "max_load": 4,
+        "seniority": "senior",
+    },
+    {
+        "id": "AGT-008", "name": "Lakshmi Rao",
+        "team": "claims", "team_name": "Claims Support",
+        "skills": ["complaint", "medical_query", "senior_citizen"],
+        "languages": ["te", "kn", "en"],
+        "available": False, "load": 4, "max_load": 4,
+        "seniority": "mid",
+    },
+    {
+        "id": "AGT-009", "name": "Farhan Shaikh",
+        "team": "claims", "team_name": "Claims Support",
+        "skills": ["complaint", "bereavement", "nri"],
+        "languages": ["en", "hi", "ur"],
+        "available": True,  "load": 0, "max_load": 4,
+        "seniority": "mid",
+    },
+
+    # ── Team: Compliance & Grievance (3 agents) ───────────────────────────
+    {
+        "id": "AGT-010", "name": "Neha Kulkarni",
+        "team": "compliance", "team_name": "Compliance & Grievance",
+        "skills": ["mis_selling", "complaint", "legal"],
+        "languages": ["mr", "hi", "en"],
+        "available": True,  "load": 0, "max_load": 3,
+        "seniority": "senior",
+    },
+    {
+        "id": "AGT-011", "name": "Sanjay Iyer",
+        "team": "compliance", "team_name": "Compliance & Grievance",
+        "skills": ["mis_selling", "legal", "high_value"],
+        "languages": ["ta", "en", "hi"],
+        "available": True,  "load": 1, "max_load": 3,
+        "seniority": "senior",
+    },
+    {
+        "id": "AGT-012", "name": "Ananya Bose",
+        "team": "compliance", "team_name": "Compliance & Grievance",
+        "skills": ["complaint", "mis_selling", "nri"],
+        "languages": ["bn", "en", "hi"],
+        "available": True,  "load": 0, "max_load": 3,
+        "seniority": "mid",
+    },
+
+    # ── Team: Technical & Payments (3 agents) ─────────────────────────────
+    {
+        "id": "AGT-013", "name": "Vikram Patel",
+        "team": "tech", "team_name": "Technical & Payments",
+        "skills": ["payment_query", "requested_human"],
+        "languages": ["gu", "hi", "en"],
+        "available": True,  "load": 0, "max_load": 6,
+        "seniority": "senior",
+    },
+    {
+        "id": "AGT-014", "name": "Divya Krishnan",
+        "team": "tech", "team_name": "Technical & Payments",
+        "skills": ["payment_query", "upsell"],
+        "languages": ["ta", "en", "kn"],
+        "available": True,  "load": 2, "max_load": 6,
+        "seniority": "mid",
+    },
+    {
+        "id": "AGT-015", "name": "Rahul Mehta",
+        "team": "tech", "team_name": "Technical & Payments",
+        "skills": ["payment_query", "nri"],
+        "languages": ["en", "hi"],
+        "available": False, "load": 5, "max_load": 6,
+        "seniority": "junior",
+    },
+
+    # ── Team: Customer Wellness (3 agents) ────────────────────────────────
+    {
+        "id": "AGT-016", "name": "Anjali Menon",
+        "team": "wellness", "team_name": "Customer Wellness",
+        "skills": ["distress", "bereavement", "senior_citizen"],
+        "languages": ["ml", "en", "hi"],
+        "available": True,  "load": 0, "max_load": 3,
+        "seniority": "senior",
+    },
+    {
+        "id": "AGT-017", "name": "Suresh Kumar",
+        "team": "wellness", "team_name": "Customer Wellness",
+        "skills": ["distress", "bereavement"],
+        "languages": ["kn", "hi", "en"],
+        "available": True,  "load": 1, "max_load": 3,
+        "seniority": "mid",
+    },
+    {
+        "id": "AGT-018", "name": "Pooja Agarwal",
+        "team": "wellness", "team_name": "Customer Wellness",
+        "skills": ["distress", "senior_citizen", "requested_human"],
+        "languages": ["hi", "en"],
+        "available": True,  "load": 0, "max_load": 3,
+        "seniority": "junior",
+    },
+
+    # ── Team: Senior / Escalation (2 agents) ──────────────────────────────
+    {
+        "id": "AGT-019", "name": "Rajesh Nambiar",
+        "team": "senior", "team_name": "Senior / Escalation",
+        "skills": ["distress","mis_selling","complaint","legal","high_value","bereavement"],
+        "languages": ["en", "hi", "ml", "ta"],
+        "available": True,  "load": 0, "max_load": 2,
+        "seniority": "manager",
+    },
+    {
+        "id": "AGT-020", "name": "Kavitha Reddy",
+        "team": "senior", "team_name": "Senior / Escalation",
+        "skills": ["distress","mis_selling","complaint","legal","nri","high_value"],
+        "languages": ["te", "kn", "en", "hi"],
+        "available": True,  "load": 0, "max_load": 2,
+        "seniority": "manager",
+    },
 ]
+
+# ── Escalation reason → required skill mapping ─────────────────────────────────
+
+REASON_SKILL_MAP: dict[str, str] = {
+    "distress":        "distress",
+    "mis_selling":     "mis_selling",
+    "bereavement":     "bereavement",
+    "complaint":       "complaint",
+    "requested_human": "requested_human",
+    "payment_failure": "payment_query",
+    "medical_query":   "medical_query",
+    "legal":           "legal",
+}
 
 
 # ── Queue item model ──────────────────────────────────────────────────────────
@@ -196,16 +401,58 @@ Be direct and practical. No fluff.
 
 # ── Agent assignment ──────────────────────────────────────────────────────────
 
-def _assign_agent(priority: str) -> tuple[Optional[str], Optional[str]]:
-    """Pick least-loaded available agent. P1 gets any available agent."""
-    available = [a for a in MOCK_AGENTS if a["available"]]
-    if not available:
+def _assign_agent(
+    priority:   str,
+    reason:     str = "",
+    language:   str = "en",
+) -> tuple[Optional[str], Optional[str]]:
+    """
+    Skill-based agent assignment.
+
+    Priority:
+      1. Available agents with matching skill + matching language
+      2. Available agents with matching skill (any language)
+      3. P1_URGENT: any available agent below max_load (fallback)
+      4. Any available agent below max_load (no match)
+    """
+    required_skill = REASON_SKILL_MAP.get(reason, "requested_human")
+
+    def _eligible(a: dict) -> bool:
+        return a["available"] and a["load"] < a.get("max_load", 5)
+
+    candidates = [a for a in MOCK_AGENTS if _eligible(a)]
+    if not candidates:
         return None, None
-    # Sort by current load
-    available.sort(key=lambda a: a["load"])
-    agent = available[0]
+
+    # Tier 1: skill match + language match
+    tier1 = [
+        a for a in candidates
+        if required_skill in a.get("skills", [])
+        and language in a.get("languages", [])
+    ]
+    # Tier 2: skill match only
+    tier2 = [
+        a for a in candidates
+        if required_skill in a.get("skills", [])
+    ]
+    # Tier 3: any available (P1 urgent fallback)
+    tier3 = candidates
+
+    # P1 urgent always escalates to senior/manager if available
+    if priority == EscalationPriority.P1_URGENT.value:
+        senior_pool = [
+            a for a in (tier1 or tier2 or tier3)
+            if a.get("seniority") in ("senior", "manager")
+        ]
+        pool = senior_pool or tier1 or tier2 or tier3
+    else:
+        pool = tier1 or tier2 or tier3
+
+    pool.sort(key=lambda a: a["load"])
+    agent = pool[0]
     agent["load"] += 1
     return agent["id"], agent["name"]
+
 
 
 # ── Main manager ──────────────────────────────────────────────────────────────
@@ -263,7 +510,11 @@ class QueueManager:
             agent_id, agent_name = (
                 (raw.get("assigned_to"), raw.get("agent_name"))
                 if raw.get("assigned_to")
-                else _assign_agent(case.priority.value)
+                else _assign_agent(
+                    priority = case.priority.value,
+                    reason   = case.reason.value,
+                    language = raw.get("language", "en"),
+                )
             )
 
             # Brief
@@ -341,8 +592,29 @@ class QueueManager:
             sla_breached     = sum(1 for q in queue if q.sla_breached),
             assigned         = sum(1 for q in queue if q.assigned_to),
             unassigned       = sum(1 for q in queue if not q.assigned_to),
-            available_agents = sum(1 for a in MOCK_AGENTS if a["available"]),
+            available_agents = sum(
+                1 for a in MOCK_AGENTS
+                if a["available"] and a["load"] < a.get("max_load", 5)
+            ),
         )
+
+    def get_specialist_roster(self) -> list[dict]:
+        """Return full 20-specialist roster with current status."""
+        return [
+            {
+                "id":         a["id"],
+                "name":       a["name"],
+                "team":       a["team_name"],
+                "skills":     ", ".join(a.get("skills", [])),
+                "languages":  ", ".join(a.get("languages", [])),
+                "seniority":  a.get("seniority", ""),
+                "available":  a["available"],
+                "load":       a["load"],
+                "max_load":   a.get("max_load", 5),
+                "capacity":   f"{a['load']}/{a.get('max_load',5)}",
+            }
+            for a in MOCK_AGENTS
+        ]
 
     def _generate_brief(self, case: EscalationCase) -> str:
         prompt = BRIEF_PROMPT.format(

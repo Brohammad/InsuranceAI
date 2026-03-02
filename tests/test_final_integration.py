@@ -18,6 +18,9 @@ from __future__ import annotations
 import sqlite3
 import time
 from datetime import datetime
+
+import pytest
+pytestmark = pytest.mark.e2e  # skip unless: pytest -m e2e
 from pathlib import Path
 from typing import Any
 

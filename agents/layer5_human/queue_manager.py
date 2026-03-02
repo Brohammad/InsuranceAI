@@ -1,0 +1,363 @@
+"""
+agents/layer5_human/queue_manager.py
+──────────────────────────────────────
+Human Escalation Queue Manager
+
+Manages the queue of EscalationCases that require human agent attention.
+
+Responsibilities:
+  1. Load all open escalations from DB (status != resolved)
+  2. Priority sorting: P1_URGENT → P2_HIGH → P3_NORMAL → P4_LOW
+  3. Agent assignment (round-robin from available agents list)
+  4. SLA tracking: P1 = 1h, P2 = 4h, P3 = 24h, P4 = 72h
+  5. Resolution recording: close case + update journey
+  6. Escalation aging: flag cases breaching SLA
+  7. Brief generation: Gemini-powered (or mock) case brief for agent
+
+The queue is backed by the escalation_cases table in DB.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Optional
+
+from loguru import logger
+from google import genai
+
+from core.config import settings
+from core.models import EscalationCase, EscalationPriority, EscalationReason
+
+
+# ── SLA definitions ───────────────────────────────────────────────────────────
+
+SLA_HOURS: dict[str, int] = {
+    EscalationPriority.P1_URGENT.value: 1,
+    EscalationPriority.P2_HIGH.value:   4,
+    EscalationPriority.P3_NORMAL.value: 24,
+    EscalationPriority.P4_LOW.value:    72,
+}
+
+PRIORITY_ORDER = {
+    EscalationPriority.P1_URGENT.value: 0,
+    EscalationPriority.P2_HIGH.value:   1,
+    EscalationPriority.P3_NORMAL.value: 2,
+    EscalationPriority.P4_LOW.value:    3,
+}
+
+# Mock agent pool
+MOCK_AGENTS = [
+    {"id": "AGT-001", "name": "Ravi Sharma",    "available": True,  "load": 0},
+    {"id": "AGT-002", "name": "Sunita Pillai",  "available": True,  "load": 1},
+    {"id": "AGT-003", "name": "Amit Desai",     "available": False, "load": 3},
+    {"id": "AGT-004", "name": "Meena Verma",    "available": True,  "load": 0},
+]
+
+
+# ── Queue item model ──────────────────────────────────────────────────────────
+
+@dataclass
+class QueueItem:
+    case:          EscalationCase
+    assigned_to:   Optional[str] = None
+    agent_name:    Optional[str] = None
+    sla_deadline:  Optional[datetime] = None
+    sla_breached:  bool = False
+    brief:         str = ""
+    created_at:    datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class QueueStats:
+    total_open:    int = 0
+    p1_count:      int = 0
+    p2_count:      int = 0
+    p3_count:      int = 0
+    p4_count:      int = 0
+    sla_breached:  int = 0
+    assigned:      int = 0
+    unassigned:    int = 0
+    available_agents: int = 0
+
+
+# ── DB helpers ────────────────────────────────────────────────────────────────
+
+def _ensure_queue_table(conn: sqlite3.Connection) -> None:
+    """Create table if it doesn't exist. If it exists (older schema), add missing columns."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS escalation_cases (
+            case_id         TEXT PRIMARY KEY,
+            journey_id      TEXT,
+            policy_number   TEXT,
+            customer_id     TEXT,
+            reason          TEXT,
+            priority        TEXT,
+            briefing_note   TEXT,
+            assigned_to     TEXT,
+            agent_name      TEXT,
+            resolved        INTEGER DEFAULT 0,
+            resolution_note TEXT,
+            created_at      TEXT,
+            resolved_at     TEXT,
+            sla_deadline    TEXT,
+            FOREIGN KEY (journey_id) REFERENCES renewal_journeys(journey_id)
+        )
+    """)
+    # Ensure agent_name column exists (older DB may lack it)
+    try:
+        conn.execute("ALTER TABLE escalation_cases ADD COLUMN agent_name TEXT")
+    except Exception:
+        pass  # Column already exists
+    conn.commit()
+
+
+def _load_open_cases(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute("""
+        SELECT * FROM escalation_cases
+        WHERE resolved = 0
+        ORDER BY
+            CASE priority
+                WHEN 'p1_urgent' THEN 0
+                WHEN 'p2_high'   THEN 1
+                WHEN 'p3_normal' THEN 2
+                WHEN 'p4_low'    THEN 3
+                ELSE 4
+            END,
+            created_at ASC
+    """).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ── Mock brief generator ──────────────────────────────────────────────────────
+
+_BRIEF_TEMPLATES = {
+    EscalationReason.DISTRESS.value: (
+        "⚠️ Customer {name} (Policy: {policy}) has shown signs of financial or emotional distress. "
+        "Approach with empathy. Do NOT discuss premium immediately. "
+        "Offer payment deferral or EMI options. Listen first."
+    ),
+    EscalationReason.MIS_SELLING.value: (
+        "🚨 Customer {name} claims mis-selling on Policy {policy}. "
+        "Pull original proposal document and KYC before calling. "
+        "Do not agree or disagree with claim. Escalate to compliance if needed."
+    ),
+    EscalationReason.BEREAVEMENT.value: (
+        "🙏 Customer {name} has experienced a bereavement. "
+        "Express condolences first. Do not discuss renewal on first call. "
+        "Offer a 30-day grace period extension. Involve senior agent if needed."
+    ),
+    EscalationReason.REQUESTED_HUMAN.value: (
+        "👤 Customer {name} (Policy: {policy}) specifically requested a human agent. "
+        "High touch required. Confirm policy details and address any concerns directly."
+    ),
+    EscalationReason.COMPLAINT.value: (
+        "📋 Formal complaint from {name} regarding Policy {policy}. "
+        "Log in CRM immediately. IRDAI response deadline: 14 days. "
+        "Provide written acknowledgement within 3 days."
+    ),
+}
+
+_DEFAULT_BRIEF = (
+    "Customer {name} (Policy: {policy}) requires human follow-up. "
+    "Review policy details and recent interaction history before calling."
+)
+
+
+def _mock_brief(case: EscalationCase, customer_name: str = "the customer") -> str:
+    template = _BRIEF_TEMPLATES.get(case.reason.value, _DEFAULT_BRIEF)
+    return template.format(name=customer_name, policy=case.policy_number)
+
+
+# ── Brief prompt ──────────────────────────────────────────────────────────────
+
+BRIEF_PROMPT = """\
+You are a senior insurance manager briefing a human agent before a sensitive customer call.
+
+ESCALATION:
+  Case ID:  {case_id}
+  Reason:   {reason}
+  Priority: {priority}
+  Policy:   {policy_number}
+  Note:     {briefing_note}
+
+Write a 3-4 sentence agent brief covering:
+1. Why this case was escalated
+2. What tone/approach the agent should take
+3. What outcome to aim for
+4. Any red flags to be aware of
+
+Be direct and practical. No fluff.
+"""
+
+
+# ── Agent assignment ──────────────────────────────────────────────────────────
+
+def _assign_agent(priority: str) -> tuple[Optional[str], Optional[str]]:
+    """Pick least-loaded available agent. P1 gets any available agent."""
+    available = [a for a in MOCK_AGENTS if a["available"]]
+    if not available:
+        return None, None
+    # Sort by current load
+    available.sort(key=lambda a: a["load"])
+    agent = available[0]
+    agent["load"] += 1
+    return agent["id"], agent["name"]
+
+
+# ── Main manager ──────────────────────────────────────────────────────────────
+
+class QueueManager:
+    """Human escalation queue — load, prioritise, assign, brief, resolve."""
+
+    def __init__(self):
+        self._db_path = str(settings.abs_db_path)
+        if not settings.mock_delivery:
+            self._client = genai.Client(api_key=settings.gemini_api_key)
+        logger.info(f"QueueManager ready | mock={settings.mock_delivery}")
+
+    def load_queue(self) -> list[QueueItem]:
+        """Load all open escalation cases, assign agents, generate briefs."""
+        conn = sqlite3.connect(self._db_path)
+        conn.row_factory = sqlite3.Row
+        _ensure_queue_table(conn)
+
+        raw_cases = _load_open_cases(conn)
+        conn.close()
+
+        if not raw_cases:
+            logger.info("Escalation queue is empty")
+            return []
+
+        # Get customer names
+        conn2 = sqlite3.connect(self._db_path)
+        conn2.row_factory = sqlite3.Row
+
+        queue: list[QueueItem] = []
+        for raw in raw_cases:
+            # Build EscalationCase
+            case = EscalationCase(
+                case_id       = raw["case_id"],
+                journey_id    = raw["journey_id"],
+                policy_number = raw["policy_number"],
+                customer_id   = raw["customer_id"],
+                reason        = EscalationReason(raw["reason"]),
+                priority      = EscalationPriority(raw["priority"]),
+                briefing_note = raw["briefing_note"] or "",
+            )
+
+            # SLA deadline
+            created_at_str = raw.get("created_at") or datetime.now().isoformat()
+            try:
+                created_at = datetime.fromisoformat(created_at_str)
+            except ValueError:
+                created_at = datetime.now()
+            sla_h    = SLA_HOURS.get(case.priority.value, 24)
+            deadline = created_at + timedelta(hours=sla_h)
+            breached = datetime.now() > deadline
+
+            # Agent assignment
+            agent_id, agent_name = (
+                (raw.get("assigned_to"), raw.get("agent_name"))
+                if raw.get("assigned_to")
+                else _assign_agent(case.priority.value)
+            )
+
+            # Brief
+            cust_row = conn2.execute(
+                "SELECT name FROM customers WHERE customer_id=?", (case.customer_id,)
+            ).fetchone()
+            cust_name = cust_row["name"] if cust_row else case.customer_id
+
+            brief = _mock_brief(case, cust_name) if settings.mock_delivery else self._generate_brief(case)
+
+            item = QueueItem(
+                case         = case,
+                assigned_to  = agent_id,
+                agent_name   = agent_name,
+                sla_deadline = deadline,
+                sla_breached = breached,
+                brief        = brief,
+            )
+            queue.append(item)
+
+            # Persist assignment if new
+            if agent_id and not raw.get("assigned_to"):
+                conn2.execute("""
+                    UPDATE escalation_cases
+                    SET assigned_to=?, agent_name=?
+                    WHERE case_id=?
+                """, (agent_id, agent_name, case.case_id))
+
+        conn2.commit()
+        conn2.close()
+
+        logger.info(
+            f"Queue loaded: {len(queue)} cases | "
+            f"P1:{sum(1 for q in queue if q.case.priority == EscalationPriority.P1_URGENT)} "
+            f"P2:{sum(1 for q in queue if q.case.priority == EscalationPriority.P2_HIGH)} "
+            f"P3:{sum(1 for q in queue if q.case.priority == EscalationPriority.P3_NORMAL)} "
+            f"P4:{sum(1 for q in queue if q.case.priority == EscalationPriority.P4_LOW)}"
+        )
+        return queue
+
+    def resolve(
+        self,
+        case_id:         str,
+        resolution_note: str,
+        resolved_by:     str = "human_agent",
+    ) -> bool:
+        """Mark a case as resolved. Updates journey status."""
+        conn = sqlite3.connect(self._db_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("""
+            UPDATE escalation_cases
+            SET resolved=1, resolution_note=?, resolved_at=?
+            WHERE case_id=?
+        """, (resolution_note, datetime.now().isoformat(), case_id))
+        # Get journey_id and re-open
+        row = conn.execute(
+            "SELECT journey_id FROM escalation_cases WHERE case_id=?", (case_id,)
+        ).fetchone()
+        if row:
+            conn.execute("""
+                UPDATE renewal_journeys SET status='in_progress' WHERE journey_id=?
+            """, (row[0],))
+        conn.commit()
+        conn.close()
+        logger.info(f"Case {case_id} resolved by {resolved_by}")
+        return True
+
+    def get_stats(self, queue: list[QueueItem]) -> QueueStats:
+        return QueueStats(
+            total_open       = len(queue),
+            p1_count         = sum(1 for q in queue if q.case.priority == EscalationPriority.P1_URGENT),
+            p2_count         = sum(1 for q in queue if q.case.priority == EscalationPriority.P2_HIGH),
+            p3_count         = sum(1 for q in queue if q.case.priority == EscalationPriority.P3_NORMAL),
+            p4_count         = sum(1 for q in queue if q.case.priority == EscalationPriority.P4_LOW),
+            sla_breached     = sum(1 for q in queue if q.sla_breached),
+            assigned         = sum(1 for q in queue if q.assigned_to),
+            unassigned       = sum(1 for q in queue if not q.assigned_to),
+            available_agents = sum(1 for a in MOCK_AGENTS if a["available"]),
+        )
+
+    def _generate_brief(self, case: EscalationCase) -> str:
+        prompt = BRIEF_PROMPT.format(
+            case_id       = case.case_id,
+            reason        = case.reason.value,
+            priority      = case.priority.value,
+            policy_number = case.policy_number,
+            briefing_note = case.briefing_note,
+        )
+        try:
+            response = self._client.models.generate_content(
+                model    = settings.model_classify,
+                contents = prompt,
+            )
+            return response.text.strip()
+        except Exception as e:
+            logger.warning(f"Brief generation failed: {e}")
+            return case.briefing_note

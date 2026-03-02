@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+  <root>
+    <mxCell id="0" />
+    <mxCell id="1" parent="0" />
+
+    <!-- TITLE -->
+    <mxCell id="title" value="Project RenewAI — 5-Layer Agent Workflow" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=20;fontStyle=1;" vertex="1" parent="1">
+      <mxGeometry x="400" y="20" width="800" height="40" as="geometry" />
+    </mxCell>
+
+    <!-- CUSTOMER -->
+    <mxCell id="cust" value="👤 Customer&#xa;Policy Due for Renewal" style="ellipse;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+      <mxGeometry x="750" y="80" width="160" height="60" as="geometry" />
+    </mxCell>
+
+    <!-- LAYER 1 BOX -->
+    <mxCell id="l1box" value="LAYER 1 — STRATEGIC (Gemini 3.1 Pro)" style="swimlane;startSize=30;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+      <mxGeometry x="200" y="190" width="1250" height="120" as="geometry" />
+    </mxCell>
+    <mxCell id="seg" value="Segmentation&#xa;Agent" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="l1box">
+      <mxGeometry x="20" y="45" width="140" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="prop" value="Propensity&#xa;Scorer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="l1box">
+      <mxGeometry x="220" y="45" width="140" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="time" value="Timing&#xa;Optimizer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="l1box">
+      <mxGeometry x="420" y="45" width="140" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="chan" value="Channel&#xa;Selector" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="l1box">
+      <mxGeometry x="620" y="45" width="140" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="orch" value="Master&#xa;Orchestrator" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffcd28;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="l1box">
+      <mxGeometry x="850" y="45" width="160" height="55" as="geometry" />
+    </mxCell>
+
+    <!-- LAYER 1 ARROWS -->
+    <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="seg" target="prop" parent="l1box">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="prop" target="time" parent="l1box">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="time" target="chan" parent="l1box">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="chan" target="orch" parent="l1box">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- cust -> seg -->
+    <mxCell id="e_cust_seg" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="cust" target="seg" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- LAYER 2 BOX -->
+    <mxCell id="l2box" value="LAYER 2 — EXECUTION (Gemini 3 Flash)" style="swimlane;startSize=30;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+      <mxGeometry x="200" y="370" width="1250" height="120" as="geometry" />
+    </mxCell>
+    <mxCell id="disp" value="Dispatcher" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="l2box">
+      <mxGeometry x="20" y="45" width="120" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="wa" value="WhatsApp&#xa;Agent (Twilio)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="l2box">
+      <mxGeometry x="200" y="45" width="150" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="em" value="Email&#xa;Agent (SMTP)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="l2box">
+      <mxGeometry x="400" y="45" width="150" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="vo" value="Voice Agent&#xa;(ElevenLabs)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="l2box">
+      <mxGeometry x="600" y="45" width="150" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="pay" value="Payment Agent&#xa;(Razorpay)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="l2box">
+      <mxGeometry x="800" y="45" width="150" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="obj" value="Objection&#xa;Handler" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="l2box">
+      <mxGeometry x="1000" y="45" width="150" height="55" as="geometry" />
+    </mxCell>
+
+    <!-- orch -> dispatcher -->
+    <mxCell id="e_orch_disp" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="orch" target="disp" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <!-- disp -> execution agents -->
+    <mxCell id="e_d_wa" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="disp" target="wa" parent="l2box">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e_d_em" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="disp" target="em" parent="l2box">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e_d_vo" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="disp" target="vo" parent="l2box">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e_d_pay" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="disp" target="pay" parent="l2box">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e_d_obj" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="disp" target="obj" parent="l2box">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- LAYER 3 BOX -->
+    <mxCell id="l3box" value="LAYER 3 — QUALITY &amp; SAFETY (Gemini 2.5 Pro + Flash)" style="swimlane;startSize=30;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+      <mxGeometry x="200" y="550" width="1250" height="120" as="geometry" />
+    </mxCell>
+    <mxCell id="crit" value="Critique&#xa;Agent" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="l3box">
+      <mxGeometry x="60" y="45" width="140" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="safe" value="Safety&#xa;Agent" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="l3box">
+      <mxGeometry x="260" y="45" width="140" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="comp2" value="Compliance&#xa;Agent (IRDAI)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="l3box">
+      <mxGeometry x="460" y="45" width="140" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="sent" value="Sentiment&#xa;Agent" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="l3box">
+      <mxGeometry x="660" y="45" width="140" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="qsco" value="Quality&#xa;Scorer 0–100" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e53333;strokeColor=#b85450;fontColor=#ffffff;fontStyle=1;" vertex="1" parent="l3box">
+      <mxGeometry x="880" y="45" width="160" height="55" as="geometry" />
+    </mxCell>
+    <!-- l3 arrows -->
+    <mxCell id="el3_1" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="crit" target="safe" parent="l3box">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="el3_2" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="safe" target="comp2" parent="l3box">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="el3_3" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="comp2" target="sent" parent="l3box">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="el3_4" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="sent" target="qsco" parent="l3box">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- L2 -> L3 -->
+    <mxCell id="e_l2_l3" value="messages" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="wa" target="crit" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- LAYER 4 BOX -->
+    <mxCell id="l4box" value="LAYER 4 — LEARNING &amp; ADAPTATION" style="swimlane;startSize=30;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+      <mxGeometry x="200" y="730" width="1250" height="120" as="geometry" />
+    </mxCell>
+    <mxCell id="feed" value="Feedback&#xa;Loop" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="l4box">
+      <mxGeometry x="100" y="45" width="150" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="abtm" value="A/B Test&#xa;Manager" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="l4box">
+      <mxGeometry x="350" y="45" width="150" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="drif" value="Drift&#xa;Detector" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="l4box">
+      <mxGeometry x="600" y="45" width="150" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="repo" value="Report&#xa;Agent" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#9673a6;strokeColor=#9673a6;fontColor=#ffffff;fontStyle=1;" vertex="1" parent="l4box">
+      <mxGeometry x="850" y="45" width="150" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="el4_1" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="feed" target="abtm" parent="l4box">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="el4_2" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="abtm" target="drif" parent="l4box">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="el4_3" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="drif" target="repo" parent="l4box">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <!-- qsco -> feed -->
+    <mxCell id="e_qsco_feed" value="score≥70" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#00aa00;" edge="1" source="qsco" target="feed" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- LAYER 5 BOX -->
+    <mxCell id="l5box" value="LAYER 5 — HUMAN ESCALATION (20 Specialists)" style="swimlane;startSize=30;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+      <mxGeometry x="200" y="910" width="1250" height="120" as="geometry" />
+    </mxCell>
+    <mxCell id="qm" value="Queue Manager&#xa;20 Specialists&#xa;Skill Routing" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="l5box">
+      <mxGeometry x="200" y="35" width="200" height="65" as="geometry" />
+    </mxCell>
+    <mxCell id="teams" value="RENEWAL(5) · CLAIMS(4) · COMPLIANCE(3)&#xa;TECH(3) · WELLNESS(3) · SENIOR MGR(2)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="l5box">
+      <mxGeometry x="480" y="35" width="380" height="65" as="geometry" />
+    </mxCell>
+    <mxCell id="supv" value="Supervisor&#xa;Dashboard&#xa;SLA RAG" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#6c8ebf;strokeColor=#6c8ebf;fontColor=#ffffff;fontStyle=1;" vertex="1" parent="l5box">
+      <mxGeometry x="940" y="35" width="160" height="65" as="geometry" />
+    </mxCell>
+    <mxCell id="el5_1" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="qm" target="teams" parent="l5box">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="el5_2" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="teams" target="supv" parent="l5box">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <!-- qsco -> qm (escalation) -->
+    <mxCell id="e_qsco_qm" value="score&lt;70 / flag" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#ff0000;fontColor=#ff0000;" edge="1" source="qsco" target="qm" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- repo -> orch feedback -->
+    <mxCell id="e_repo_orch" value="insights loop" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#9673a6;dashed=1;" edge="1" source="repo" target="orch" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="1370" y="790" />
+          <mxPoint x="1370" y="250" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+
+  </root>
+</mxGraphModel>

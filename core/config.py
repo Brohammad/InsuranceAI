@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     twilio_auth_token:    str = Field("", alias="TWILIO_AUTH_TOKEN")
     twilio_whatsapp_from: str = Field("whatsapp:+14155238886", alias="TWILIO_WHATSAPP_FROM")
 
-    # ── ElevenLabs (Voice TTS) ─────────────────────────────────────────────
+    # ── ElevenLabs (Voice TTS — eleven_multilingual_v2 supports all 9 Indian languages) ──
     elevenlabs_api_key:           str = Field("", alias="ELEVENLABS_API_KEY")
     elevenlabs_voice_hindi:       str = Field("pNInz6obpgDQGcFmaJgB", alias="ELEVENLABS_VOICE_ID_HINDI")
     elevenlabs_voice_english:     str = Field("21m00Tcm4TlvDq8ikWAM", alias="ELEVENLABS_VOICE_ID_ENGLISH")
@@ -68,6 +68,22 @@ class Settings(BaseSettings):
     elevenlabs_voice_bengali:     str = Field("AZnzlk1XvdvUeBnXmlld", alias="ELEVENLABS_VOICE_ID_BENGALI")
     elevenlabs_voice_marathi:     str = Field("AZnzlk1XvdvUeBnXmlld", alias="ELEVENLABS_VOICE_ID_MARATHI")
     elevenlabs_voice_gujarati:    str = Field("AZnzlk1XvdvUeBnXmlld", alias="ELEVENLABS_VOICE_ID_GUJARATI")
+
+    # ── Sarvam AI (Indian-language Voice TTS) ─────────────────────────────
+    # Preferred over ElevenLabs for all Indian languages (hi/ta/te/kn/ml/bn/mr/gu)
+    # Get API key at: https://dashboard.sarvam.ai
+    sarvam_api_key:               str = Field("", alias="SARVAM_API_KEY")
+    sarvam_tts_endpoint:          str = Field("https://api.sarvam.ai/text-to-speech", alias="SARVAM_TTS_ENDPOINT")
+    # Sarvam speaker IDs per language (bulbul:v2 model supports all Indian languages)
+    sarvam_speaker_hindi:         str = Field("meera",   alias="SARVAM_SPEAKER_HINDI")
+    sarvam_speaker_tamil:         str = Field("meera",   alias="SARVAM_SPEAKER_TAMIL")
+    sarvam_speaker_telugu:        str = Field("meera",   alias="SARVAM_SPEAKER_TELUGU")
+    sarvam_speaker_kannada:       str = Field("meera",   alias="SARVAM_SPEAKER_KANNADA")
+    sarvam_speaker_malayalam:     str = Field("meera",   alias="SARVAM_SPEAKER_MALAYALAM")
+    sarvam_speaker_bengali:       str = Field("meera",   alias="SARVAM_SPEAKER_BENGALI")
+    sarvam_speaker_marathi:       str = Field("meera",   alias="SARVAM_SPEAKER_MARATHI")
+    sarvam_speaker_gujarati:      str = Field("meera",   alias="SARVAM_SPEAKER_GUJARATI")
+    sarvam_speaker_english:       str = Field("meera",   alias="SARVAM_SPEAKER_ENGLISH")
 
     # ── Mock mode ──────────────────────────────────────────────────────────
     mock_delivery: bool = Field(True, alias="MOCK_DELIVERY")

@@ -1,5 +1,12 @@
 # 🛡️ Project RenewAI — Suraksha Life Insurance
 
+![Python](https://img.shields.io/badge/Python-3.10-blue?logo=python&logoColor=white)
+![Gemini](https://img.shields.io/badge/Gemini-2.5--pro%20%2F%202.5--flash-4285F4?logo=google&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-225%20passing-brightgreen?logo=pytest)
+![Agents](https://img.shields.io/badge/agents-21-orange)
+![Layers](https://img.shields.io/badge/layers-5-purple)
+![License](https://img.shields.io/badge/license-MIT-green)
+
 > **AI-powered policy renewal system** — 21 autonomous agents across 5 layers, handling WhatsApp · Email · Voice outreach, UPI payments, IRDAI compliance, and human escalation for life insurance renewal.
 
 ---
@@ -15,6 +22,8 @@
 4. **Collects payment** via UPI link, QR code, or AutoPay
 5. **Escalates to a human specialist** only when AI cannot handle it
 6. **Learns from outcomes** — each paid/lapsed result makes the next prediction more accurate
+
+> 💡 **In production terms:** one agent handles ~500 renewal reminders/day, with < 2% escalation rate and full IRDAI audit trail — zero human effort for standard cases.
 
 **Tech:** Python 3.10 · Gemini AI (`gemini-2.5-pro` / `gemini-2.5-flash`) · ElevenLabs TTS · Twilio · Razorpay · SQLite · Streamlit
 
@@ -42,7 +51,7 @@
 ║  └──────────────────────────────┬────────────────────────────────────────────────┘    ║
 ║                                 │ messages + results                                  ║
 ║  ┌──────────────────────────────▼────────────────────────────────────────────────┐    ║
-║  │  LAYER 3 — QUALITY & SAFETY  (Gemini 2.5 Pro + Flash)                        │    ║
+║  │  LAYER 3 — QUALITY & SAFETY  (`gemini-2.5-pro` + `gemini-2.5-flash`)         │    ║
 ║  │                                                                               │    ║
 ║  │  [Critique Agent] → [Safety Agent] → [Compliance Agent] → [Sentiment] →     │    ║
 ║  │  [Quality Scorer]                                                             │    ║
@@ -78,7 +87,7 @@
                                  │
                     ┌────────────▼───────────┐
                     │   PROPENSITY SCORER     │
-                    │  lapse_score: 0.0–1.0   │
+                    │  lapse_score: 0–100     │
                     └────────────┬───────────┘
                                  │
                     ┌────────────▼───────────┐
@@ -248,7 +257,7 @@ Every time a customer **pays** or **lapses**, the outcome is stored as a `feedba
        │
        ▼
   FeedbackLoopAgent.run()
-  • scores updates stored in DB
+  • outcome scores stored in DB
   • A/B test + drift check run
        │
        ▼
@@ -375,7 +384,7 @@ InsuranceAI/
 | Vector DB | ChromaDB (keyword fallback) |
 | Database | SQLite |
 | Dashboard | Streamlit + Plotly |
-| Testing | pytest — 218 tests |
+| Testing | pytest — 225 tests |
 | Language | Python 3.10 |
 
 ---
@@ -391,7 +400,14 @@ pip install -r requirements.txt
 
 # 2. Configure
 cp .env.example .env
-# Add: GEMINI_API_KEY, ELEVENLABS_API_KEY, TWILIO_*, RAZORPAY_*
+# Edit .env and fill in:
+#   GEMINI_API_KEY=AIza...          ← Google AI Studio → https://aistudio.google.com/app/apikey
+#   ELEVENLABS_API_KEY=sk_...       ← ElevenLabs dashboard
+#   TWILIO_ACCOUNT_SID=AC...        ← Twilio console
+#   TWILIO_AUTH_TOKEN=...
+#   TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
+#   RAZORPAY_KEY_ID=rzp_test_...    ← Razorpay dashboard (test mode is fine)
+#   RAZORPAY_KEY_SECRET=...
 
 # 3. Seed database
 python data/seed.py

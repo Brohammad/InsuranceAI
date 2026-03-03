@@ -18,6 +18,7 @@ Uses gemini-2.5-flash (fast classification / scoring task).
 from __future__ import annotations
 
 import json
+import sqlite3
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -25,6 +26,12 @@ from loguru import logger
 
 from core.config import settings, get_gemini_client
 from core.models import Customer, Policy, CustomerSegment
+
+
+# ── Feedback-derived few-shot cache ───────────────────────────────────────────
+# Holds the latest examples built from real feedback_events.
+# Updated by PropensityAgent.refresh_from_feedback() and prepended to the prompt.
+_FEEDBACK_FEW_SHOT: str = ""   # module-level cache; updated in-place
 
 
 # ── Output model ──────────────────────────────────────────────────────────────
@@ -105,6 +112,9 @@ Respond with ONLY a JSON object — no markdown, no explanation:
 class PropensityAgent:
     """Scores lapse probability for a (customer, policy) pair."""
 
+    # Minimum feedback events needed before refreshing the prompt
+    REFRESH_THRESHOLD = 10
+
     def __init__(self):
         self.client = get_gemini_client()
         self.model  = settings.model_classify   # gemini-2.5-flash
@@ -126,6 +136,86 @@ class PropensityAgent:
         delta = policy.renewal_due_date - date.today()
         return max(delta.days, 0)
 
+    # ── feedback-driven prompt refresh ───────────────────────────────────────
+
+    def refresh_from_feedback(self, min_events: int = REFRESH_THRESHOLD) -> bool:
+        """
+        Reads feedback_events from DB and rebuilds the few-shot example block
+        that is prepended to every scoring prompt.
+
+        Only refreshes when at least `min_events` strong-signal events exist.
+        Returns True if the cache was updated, False if skipped.
+        """
+        global _FEEDBACK_FEW_SHOT
+        try:
+            conn = sqlite3.connect(str(settings.abs_db_path))
+            conn.row_factory = sqlite3.Row
+
+            # Count strong-signal events
+            count_row = conn.execute(
+                "SELECT COUNT(*) as n FROM feedback_events WHERE signal IN "
+                "('strong_positive','strong_negative','moderate_negative')"
+            ).fetchone()
+            n = count_row["n"] if count_row else 0
+
+            if n < min_events:
+                logger.info(
+                    f"PropensityAgent: skipping refresh — only {n}/{min_events} "
+                    "strong-signal events available"
+                )
+                conn.close()
+                return False
+
+            # Pull top 5 strong-positive (paid) examples and top 5 strong-negative (lapsed)
+            paid_rows = conn.execute("""
+                SELECT fe.policy_number, fe.old_score, fe.new_score,
+                       rj.segment, rj.lapse_score
+                FROM feedback_events fe
+                LEFT JOIN renewal_journeys rj ON fe.journey_id = rj.journey_id
+                WHERE fe.signal = 'strong_positive'
+                ORDER BY fe.created_at DESC LIMIT 5
+            """).fetchall()
+
+            lapsed_rows = conn.execute("""
+                SELECT fe.policy_number, fe.old_score, fe.new_score,
+                       rj.segment, rj.lapse_score
+                FROM feedback_events fe
+                LEFT JOIN renewal_journeys rj ON fe.journey_id = rj.journey_id
+                WHERE fe.signal IN ('strong_negative','moderate_negative')
+                ORDER BY fe.created_at DESC LIMIT 5
+            """).fetchall()
+
+            conn.close()
+
+            lines = [
+                "\n── REAL OUTCOME EXAMPLES (from recent policy renewals) ──",
+                "Use these as calibration anchors when scoring:\n",
+            ]
+            for r in paid_rows:
+                lines.append(
+                    f"  ✅ PAID    policy={r['policy_number']} "
+                    f"segment={r['segment'] or 'unknown'} "
+                    f"score_before={r['old_score']:.0f} → after={r['new_score']:.0f}"
+                )
+            for r in lapsed_rows:
+                lines.append(
+                    f"  ❌ LAPSED  policy={r['policy_number']} "
+                    f"segment={r['segment'] or 'unknown'} "
+                    f"score_before={r['old_score']:.0f} → after={r['new_score']:.0f}"
+                )
+            lines.append("─" * 55 + "\n")
+
+            _FEEDBACK_FEW_SHOT = "\n".join(lines)
+            logger.info(
+                f"PropensityAgent: prompt refreshed with {len(paid_rows)} paid "
+                f"+ {len(lapsed_rows)} lapsed examples ({n} total events)"
+            )
+            return True
+
+        except Exception as exc:
+            logger.warning(f"PropensityAgent.refresh_from_feedback failed: {exc}")
+            return False
+
     # ── main entry point ─────────────────────────────────────────────────────
 
     def run(
@@ -139,7 +229,10 @@ class PropensityAgent:
         bd = self._payment_breakdown(policy.payment_history)
         days = self._days_to_due(policy)
 
-        prompt = PROPENSITY_PROMPT.format(
+        # Inject feedback few-shot examples if available
+        few_shot_block = _FEEDBACK_FEW_SHOT  # empty string if not yet refreshed
+
+        prompt = few_shot_block + PROPENSITY_PROMPT.format(
             name           = customer.name,
             age            = customer.age,
             occupation     = customer.occupation,

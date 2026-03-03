@@ -309,6 +309,58 @@ def run_layer1(customer: Customer, policy: Policy) -> RenewalJourney:
     return final_state["journey"]
 
 
+def run_batch_with_feedback(
+    customer_policy_pairs: list[tuple],
+    run_feedback_loop: bool = True,
+) -> dict:
+    """
+    Run Layer 1 for a batch of (Customer, Policy) pairs, then optionally
+    close the learning loop via FeedbackLoopAgent.
+
+    If enough strong-signal feedback events exist (≥ PropensityAgent.REFRESH_THRESHOLD),
+    the PropensityAgent's prompt is automatically enriched with real outcome examples
+    so the NEXT batch benefits from self-calibration.
+
+    Returns:
+        {
+          "journeys":  list[RenewalJourney],
+          "feedback":  FeedbackSummary | None,
+          "prompt_refreshed": bool,
+        }
+    """
+    journeys = []
+    for customer, policy in customer_policy_pairs:
+        try:
+            journey = run_layer1(customer, policy)
+            if journey:
+                journeys.append(journey)
+        except Exception as exc:
+            logger.warning(f"run_batch_with_feedback: skipped {policy.policy_number} — {exc}")
+
+    summary = None
+    prompt_refreshed = False
+
+    if run_feedback_loop:
+        try:
+            from agents.layer4_learning.feedback_loop import FeedbackLoopAgent
+            fb_agent = FeedbackLoopAgent()
+            _events, summary = fb_agent.run()
+            prompt_refreshed = getattr(summary, "propensity_prompt_refreshed", False)
+            logger.info(
+                f"Batch complete — {len(journeys)} journeys | "
+                f"feedback events={summary.total_events} | "
+                f"prompt_refreshed={prompt_refreshed}"
+            )
+        except Exception as exc:
+            logger.warning(f"Feedback loop skipped in batch: {exc}")
+
+    return {
+        "journeys":       journeys,
+        "feedback":       summary,
+        "prompt_refreshed": prompt_refreshed,
+    }
+
+
 # ── Standalone test ────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

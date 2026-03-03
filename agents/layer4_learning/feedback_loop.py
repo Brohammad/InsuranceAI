@@ -13,6 +13,9 @@ Closes the learning loop by:
   3. Writing feedback_events to DB (audit trail)
   4. Updating lapse_score on renewal_journeys for future run prioritisation
   5. Emitting a FeedbackSummary with aggregate stats
+  6. Auto-triggering PropensityAgent.refresh_from_feedback() once enough
+     strong-signal events accumulate (threshold = PropensityAgent.REFRESH_THRESHOLD)
+     so the next scoring run uses real outcome examples in the prompt.
 
 The feedback loop is designed to run AFTER each dispatch cycle so that
 the next run's propensity model starts with updated scores.
@@ -74,15 +77,16 @@ class FeedbackEvent:
 
 @dataclass
 class FeedbackSummary:
-    total_events:        int = 0
-    positive_signals:    int = 0
-    negative_signals:    int = 0
-    avg_lapse_delta:     float = 0.0
-    policies_improved:   int = 0   # lapse score went down
-    policies_worsened:   int = 0   # lapse score went up
-    payments_confirmed:  int = 0
-    opt_outs:           int = 0
-    escalations:        int = 0
+    total_events:               int = 0
+    positive_signals:           int = 0
+    negative_signals:           int = 0
+    avg_lapse_delta:            float = 0.0
+    policies_improved:          int = 0   # lapse score went down
+    policies_worsened:          int = 0   # lapse score went up
+    payments_confirmed:         int = 0
+    opt_outs:                   int = 0
+    escalations:                int = 0
+    propensity_prompt_refreshed: bool = False  # True if prompt was auto-updated
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -157,7 +161,13 @@ def _save_event(conn: sqlite3.Connection, ev: FeedbackEvent) -> None:
 # ── Main agent ────────────────────────────────────────────────────────────────
 
 class FeedbackLoopAgent:
-    """Reads interaction outcomes + quality scores → updates lapse scores."""
+    """Reads interaction outcomes + quality scores → updates lapse scores.
+
+    After every run, if enough strong-signal feedback events have accumulated
+    (≥ PropensityAgent.REFRESH_THRESHOLD), the PropensityAgent's prompt is
+    automatically refreshed with real outcome examples so future scoring runs
+    are self-calibrating.
+    """
 
     def __init__(self):
         self._db_path = str(settings.abs_db_path)
@@ -231,4 +241,24 @@ class FeedbackLoopAgent:
             f"Feedback loop complete | {len(events)} events | "
             f"+ve={pos} -ve={neg} | avg_delta={summary.avg_lapse_delta:+.1f}"
         )
+
+        # ── Auto-trigger propensity prompt refresh ───────────────────────────
+        # Once enough real outcomes exist the PropensityAgent recalibrates its
+        # Gemini prompt with live few-shot examples — no manual intervention needed.
+        try:
+            from agents.layer1_strategic.propensity import PropensityAgent
+            _pa = PropensityAgent.__new__(PropensityAgent)   # no Gemini client needed
+            _pa.client = None
+            _pa.model  = None
+            refreshed = _pa.refresh_from_feedback(
+                min_events=PropensityAgent.REFRESH_THRESHOLD
+            )
+            if refreshed:
+                summary.propensity_prompt_refreshed = True
+                logger.info(
+                    "Propensity prompt auto-refreshed with real outcome examples"
+                )
+        except Exception as exc:
+            logger.warning(f"Propensity auto-refresh skipped: {exc}")
+
         return events, summary

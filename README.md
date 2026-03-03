@@ -4,6 +4,22 @@
 
 ---
 
+## 📖 What Is This?
+
+**The problem:** Insurance companies lose revenue when customers forget to renew their policies. Manual follow-up by human agents is slow, expensive, and inconsistent.
+
+**The solution:** RenewAI is a fully automated renewal engine. When a policy is due, the system:
+1. **Analyses** the customer (segment, lapse risk, best contact time)
+2. **Reaches out** via WhatsApp, Email, or Voice — in their language
+3. **Checks every message** for quality, safety, and IRDAI compliance before sending
+4. **Collects payment** via UPI link, QR code, or AutoPay
+5. **Escalates to a human specialist** only when AI cannot handle it
+6. **Learns from outcomes** — each paid/lapsed result makes the next prediction more accurate
+
+**Tech:** Python 3.10 · Gemini AI (`gemini-2.5-pro` / `gemini-2.5-flash`) · ElevenLabs TTS · Twilio · Razorpay · SQLite · Streamlit
+
+---
+
 ## 📐 System Architecture
 
 ```
@@ -12,14 +28,14 @@
 ╠══════════════════════════════════════════════════════════════════════════════════════╣
 ║                                                                                      ║
 ║  ┌─────────────────────────────────────────────────────────────────────────────┐    ║
-║  │  LAYER 1 — STRATEGIC  (Gemini 3.1 Pro)                                      │    ║
+║  │  LAYER 1 — STRATEGIC  (gemini-2.5-pro)                                        │    ║
 ║  │                                                                               │    ║
 ║  │  [Segmentation] → [Propensity Score] → [Timing Optimizer] → [Channel        │    ║
 ║  │   Selector] → [Master Orchestrator]                                           │    ║
 ║  └──────────────────────────────┬────────────────────────────────────────────────┘    ║
 ║                                 │ journey plan                                        ║
 ║  ┌──────────────────────────────▼────────────────────────────────────────────────┐    ║
-║  │  LAYER 2 — EXECUTION  (Gemini 3 Flash)                                        │    ║
+║  │  LAYER 2 — EXECUTION  (gemini-2.5-flash)                                      │    ║
 ║  │                                                                               │    ║
 ║  │  [Dispatcher] → [WhatsApp Agent] │ [Email Agent] │ [Voice Agent]             │    ║
 ║  │                → [Payment Agent] │ [Objection Handler]                       │    ║
@@ -33,7 +49,7 @@
 ║  └──────────────────────────────┬────────────────────────────────────────────────┘    ║
 ║                                 │ scores + flags                                      ║
 ║  ┌──────────────────────────────▼────────────────────────────────────────────────┐    ║
-║  │  LAYER 4 — LEARNING  (Gemini 3 Flash)                                         │    ║
+║  │  LAYER 4 — LEARNING  (gemini-2.5-flash)                                       │    ║
 ║  │                                                                               │    ║
 ║  │  [Feedback Loop] → [A/B Test Manager] → [Drift Detector] → [Report Agent]   │    ║
 ║  └──────────────────────────────┬────────────────────────────────────────────────┘    ║
@@ -222,6 +238,51 @@ ESCALATION TRIGGER
 
 ---
 
+## 🔁 Closed Feedback Loop — System Gets Smarter Automatically
+
+Every time a customer **pays** or **lapses**, the outcome is stored as a `feedback_event`. Once 10+ strong-signal events accumulate, the `FeedbackLoopAgent` automatically calls `PropensityAgent.refresh_from_feedback()`. This rebuilds the Gemini prompt with real few-shot examples drawn from actual outcomes — no retraining, no manual work.
+
+```
+  OUTCOME RECORDED
+  (paid / lapsed)
+       │
+       ▼
+  FeedbackLoopAgent.run()
+  • scores updates stored in DB
+  • A/B test + drift check run
+       │
+       ▼
+  ≥ 10 strong-signal events?
+       │
+    Yes ▼
+  PropensityAgent.refresh_from_feedback()
+  • reads top 5 PAID + top 5 LAPSED from real data
+  • builds few-shot block:
+      age=42 · Mumbai · score=0.87 → PAID ✅
+      age=58 · Pune   · score=0.21 → LAPSED ❌
+  • stores in module-level cache _FEEDBACK_FEW_SHOT
+       │
+       ▼
+  Next PropensityAgent.run() call
+  • few-shot block prepended to Gemini prompt
+  • lapse_score is now grounded in real outcomes
+       │
+       ▼
+  FeedbackSummary returned
+  propensity_prompt_refreshed = True
+```
+
+**Key files:**
+
+| File | What it does |
+|------|-------------|
+| `agents/layer1_strategic/propensity.py` | `refresh_from_feedback()` + `_FEEDBACK_FEW_SHOT` cache |
+| `agents/layer4_learning/feedback_loop.py` | Auto-triggers refresh at end of `run()` |
+| `agents/layer1_strategic/orchestrator.py` | `run_batch_with_feedback()` — batch + auto-learn in one call |
+| `tests/test_feedback_propensity_loop.py` | 7 tests covering the full loop |
+
+---
+
 ## 🔌 Integration Layer
 
 ```
@@ -281,7 +342,7 @@ InsuranceAI/
 │   ├── seed.py                  # Sample data seeder
 │   └── renewai.db               # SQLite database
 │
-├── tests/                       # 218 unit tests (5.45s)
+├── tests/                       # 225 unit tests (~6s)
 │   ├── test_dashboard.py        # 40 tests
 │   ├── test_observability.py    # 35 tests
 │   ├── test_integrations.py     # 35 tests
@@ -289,6 +350,7 @@ InsuranceAI/
 │   ├── test_language_utils.py   # 39 tests
 │   ├── test_payment_agent.py    # 21 tests
 │   ├── test_human_queue.py      # 11 tests
+│   ├── test_feedback_propensity_loop.py  #  7 tests ← closed feedback loop
 │   └── test_final_integration.py# 5 e2e tests (real Gemini — run with -m e2e)
 │
 ├── pytest.ini                   # Default: skip e2e tests
@@ -302,10 +364,10 @@ InsuranceAI/
 
 | Component | Technology |
 |-----------|-----------|
-| LLM — Orchestration | Gemini 3.1 Pro Preview |
-| LLM — Execution | Gemini 3 Flash Preview |
-| LLM — Critique/Review | Gemini 2.5 Pro |
-| LLM — Safety/Classify | Gemini 2.5 Flash |
+| LLM — Orchestration | `gemini-2.5-pro` |
+| LLM — Execution | `gemini-2.5-flash` |
+| LLM — Critique/Review | `gemini-2.5-pro` |
+| LLM — Safety/Classify | `gemini-2.5-flash` |
 | Voice TTS | ElevenLabs `eleven_multilingual_v2` |
 | WhatsApp | Twilio Sandbox |
 | Email | SMTP (MailHog local / SendGrid prod) |
@@ -334,8 +396,8 @@ cp .env.example .env
 # 3. Seed database
 python data/seed.py
 
-# 4. Run tests (218 fast unit tests)
-pytest                        # unit tests only  (~5s)
+# 4. Run tests (225 fast unit tests)
+pytest                        # unit tests only  (~6s)
 pytest -m e2e                 # full e2e with real Gemini (~14min)
 
 # 5. Launch dashboard
@@ -348,15 +410,16 @@ streamlit run dashboard/app.py
 ## 🧪 Test Summary
 
 ```
-tests/test_language_utils.py   ████████████████████  39 passed
-tests/test_voice_agent.py      ██████████████████    35 passed
-tests/test_observability.py    ██████████████████    35 passed
-tests/test_integrations.py     ██████████████████    35 passed
-tests/test_dashboard.py        ████████████████████  40 passed
-tests/test_payment_agent.py    ███████████           21 passed
-tests/test_human_queue.py      ██████                11 passed
-─────────────────────────────────────────────────────────────
-TOTAL                                               218 passed  ⚡ 5.45s
+tests/test_language_utils.py        ████████████████████  39 passed
+tests/test_voice_agent.py           ██████████████████    35 passed
+tests/test_observability.py         ██████████████████    35 passed
+tests/test_integrations.py          ██████████████████    35 passed
+tests/test_dashboard.py             ████████████████████  40 passed
+tests/test_payment_agent.py         ███████████           21 passed
+tests/test_human_queue.py           ██████                11 passed
+tests/test_feedback_propensity_loop ████                   7 passed  ← new
+─────────────────────────────────────────────────────────────────────
+TOTAL                                                     225 passed  ⚡ ~6s
 ```
 
 ---
@@ -373,7 +436,10 @@ TOTAL                                               218 passed  ⚡ 5.45s
 | `f6fb523` | Observability — cost tracker + audit trail |
 | `dc10d4f` | Integration stubs — CRM, PAS, IRDAI, Payment GW |
 | `b147c8a` | 20-specialist human queue + skill-based routing |
+| `59c0fbf` | Closed feedback loop — PropensityAgent auto-recalibrates from real outcomes (7 tests) |
+| `be9707a` | Knowledge base + memory files added |
+| `6416b23` | WORKFLOW.md rewrite — beginner-friendly guide with glossary |
 
 ---
 
-*Built for Suraksha Life Insurance · Project RenewAI · Python 3.10 · Gemini AI*
+*Built for Suraksha Life Insurance · Project RenewAI · Python 3.10 · Gemini AI · 21 Agents · 5 Layers · 225 Tests*

@@ -324,7 +324,7 @@ elif page == "🔄 Journeys":
             return f"color: {c}; font-weight: 600"
 
         st.dataframe(
-            jdf.style.applymap(_color_status, subset=["status"]),
+            jdf.style.map(_color_status, subset=["status"]),
             use_container_width=True,
             height=420,
         )
@@ -457,7 +457,7 @@ elif page == "✅ Quality":
             return f"color: {c}; font-weight: 700"
 
         st.dataframe(
-            qdf.style.applymap(_grade_color, subset=["grade"]),
+            qdf.style.map(_grade_color, subset=["grade"]),
             use_container_width=True, height=380,
         )
     else:
@@ -600,7 +600,7 @@ elif page == "📅 Renewals Due":
             "preferred_channel","preferred_language","status",
         ]
         st.dataframe(
-            rdf[display_cols].style.applymap(_days_color, subset=["days_to_due"]),
+            rdf[display_cols].style.map(_days_color, subset=["days_to_due"]),
             use_container_width=True, height=420,
         )
 

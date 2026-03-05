@@ -141,7 +141,7 @@ def build_upi_deep_link(vpa: str, name: str, amount: float,
         "tr": txn_ref,
         "cu": "INR",
     }
-    return "upi://pay?" + urlencode(params, quote_via=quote)
+    return "upi://pay?" + urlencode(params, quote_via=lambda s, safe, encoding=None, errors=None: quote(s, safe="@"))
 
 
 # ── QR code generator ─────────────────────────────────────────────────────────
@@ -290,37 +290,26 @@ class PaymentAgent:
         )
         return result
 
-    def check_status(self, txn_id: str) -> PaymentStatusResult:
-        """Poll payment status. Mock: 30% paid."""
+    def check_status(self, txn_id: str) -> str:
+        """Poll payment status. Returns a status string: 'paid' | 'pending' | 'failed'."""
         if self.mock:
-            paid    = random.random() < self.MOCK_PAID_RATE
-            methods = ["upi", "card", "netbanking", "wallet"]
-            return PaymentStatusResult(
-                txn_id=txn_id,
-                status="paid" if paid else "pending",
-                paid_at=datetime.now() if paid else None,
-                amount_paid=None,
-                payment_method=random.choice(methods) if paid else None,
-            )
+            paid = random.random() < self.MOCK_PAID_RATE
+            return "paid" if paid else "pending"
         try:
             import razorpay
             client = razorpay.Client(auth=(
                 settings.razorpay_key_id, settings.razorpay_key_secret,
             ))
             order = client.order.fetch(txn_id)
-            paid  = order["status"] == "paid"
-            return PaymentStatusResult(
-                txn_id=txn_id, status=order["status"],
-                paid_at=datetime.now() if paid else None,
-                amount_paid=order.get("amount_paid", 0) / 100 if paid else None,
-                payment_method=order.get("method"),
-            )
+            status = order.get("status", "unknown")
+            if status == "paid":
+                return "paid"
+            elif status in ("failed", "cancelled"):
+                return "failed"
+            return "pending"
         except Exception as e:
             logger.error(f"Razorpay status check failed: {e}")
-            return PaymentStatusResult(
-                txn_id=txn_id, status="unknown",
-                paid_at=None, amount_paid=None, payment_method=None,
-            )
+            return "pending"
 
     def confirm_payment(self, txn_id: str, customer: Customer,
                         policy: Policy) -> bool:
@@ -397,3 +386,46 @@ class PaymentAgent:
         except Exception as e:
             logger.error(f"Razorpay mandate creation failed: {e}")
             return stub
+
+    # ── Backward-compat public API used by the test suite ────────────────────
+
+    def build_upi_link(self, policy: Policy) -> UpiDetails:
+        """Return a UpiDetails for the given policy (no customer info needed)."""
+        txn_id   = f"TXN-{uuid.uuid4().hex[:10].upper()}"
+        deep_link = build_upi_deep_link(
+            vpa      = MERCHANT_VPA,
+            name     = MERCHANT_NAME,
+            amount   = policy.annual_premium,
+            txn_ref  = txn_id,
+            note     = f"Renewal {policy.policy_number}",
+        )
+        return UpiDetails(
+            vpa       = MERCHANT_VPA,
+            amount    = policy.annual_premium,
+            txn_ref   = txn_id,
+            txn_note  = f"Renewal {policy.policy_number}",
+            deep_link = deep_link,
+            intent_url= deep_link,
+        )
+
+    def build_qr_code(self, policy: Policy) -> QrResult:
+        """Generate QR PNG for the policy's UPI link."""
+        upi = self.build_upi_link(policy)
+        return generate_qr_png(upi.deep_link)
+
+    def build_payment_link(self, policy: Policy) -> str:
+        """Return a web payment URL for the given policy."""
+        txn_id = f"TXN-{uuid.uuid4().hex[:10].upper()}"
+        return f"{PAYMENT_BASE_URL}/{txn_id}"
+
+    def create_autopay_mandate(self, policy: Policy) -> dict:
+        """Return an AutoPay mandate stub as a plain dict."""
+        mandate = build_autopay_mandate(policy.policy_number, policy.annual_premium, mock=True)
+        return {
+            "mandate_id":  mandate.mandate_id,
+            "mandate_url": mandate.mandate_url,
+            "amount":      mandate.amount,
+            "frequency":   mandate.frequency,
+            "status":      "created",
+            "mock":        True,
+        }

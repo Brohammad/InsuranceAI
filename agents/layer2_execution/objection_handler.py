@@ -165,11 +165,15 @@ OBJECTION_LIBRARY: dict[ObjectionType, dict] = {
 
 @dataclass
 class ObjectionResult:
-    objection_type:   ObjectionType
-    detected_text:    str
-    counter_response: str
-    should_escalate:  bool
-    escalation_case:  EscalationCase | None = None
+    objection_type:    ObjectionType
+    detected_text:     str
+    counter_response:  str
+    should_escalate:   bool
+    escalation_case:   EscalationCase | None = None
+    # Extended fields returned by handle()
+    resolved:          bool = False
+    next_action:       str = ""
+    follow_up_required: bool = False
 
 
 # ── Prompt ────────────────────────────────────────────────────────────────────
@@ -274,6 +278,57 @@ class ObjectionHandlerAgent:
                 f"for policy {policy.policy_number} (₹{policy.annual_premium:,.0f}). "
                 f"Immediate attention required."
             ),
+        )
+
+    def handle(
+        self,
+        objection_type: str,
+        customer: Customer,
+        policy: Policy,
+        journey_id: str = "J-TEST",
+    ) -> ObjectionResult:
+        """High-level alias used by tests.
+        Uses Gemini (or mock) to resolve the objection, returning
+        resolved/next_action/follow_up_required fields."""
+        import json as _json
+
+        if not self.mock:
+            prompt = OBJECTION_PROMPT.format(
+                message       = objection_type,
+                name          = customer.name,
+                policy_number = policy.policy_number,
+                product_type  = policy.product_type.value,
+                premium       = policy.annual_premium,
+                sum_assured   = policy.sum_assured,
+                language      = customer.preferred_language.value,
+            )
+            resp = self.client.models.generate_content(model=self.model, contents=prompt)
+            raw  = resp.text.strip().lstrip("```json").rstrip("```").strip()
+            data = _json.loads(raw)
+            obj_t = ObjectionType(data.get("objection_type", "generic"))
+            return ObjectionResult(
+                objection_type    = obj_t,
+                detected_text     = objection_type,
+                counter_response  = data.get("response", data.get("counter_response", "")),
+                should_escalate   = OBJECTION_LIBRARY[obj_t].get("escalate", False),
+                resolved          = bool(data.get("resolved", False)),
+                next_action       = data.get("next_action", ""),
+                follow_up_required= bool(data.get("follow_up_required", False)),
+            )
+
+        # mock path — delegate to run() for classification, then build extended result
+        base = self.run(customer=customer, policy=policy,
+                        journey_id=journey_id, message=objection_type)
+        return ObjectionResult(
+            objection_type    = base.objection_type,
+            detected_text     = base.detected_text,
+            counter_response  = base.counter_response,
+            should_escalate   = base.should_escalate,
+            escalation_case   = base.escalation_case,
+            resolved          = not base.should_escalate,
+            next_action       = "send_emi_link" if base.objection_type == ObjectionType.TOO_EXPENSIVE
+                                else "schedule_callback",
+            follow_up_required= base.should_escalate,
         )
 
     def run(

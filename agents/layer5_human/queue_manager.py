@@ -260,6 +260,7 @@ REASON_SKILL_MAP: dict[str, str] = {
     "payment_failure": "payment_query",
     "medical_query":   "medical_query",
     "legal":           "legal",
+    "legal_threat":    "legal",
 }
 
 
@@ -615,6 +616,63 @@ class QueueManager:
             }
             for a in MOCK_AGENTS
         ]
+
+    # ── Test-accessible helpers ───────────────────────────────────────────────
+
+    def _db_add_case(self, conn: sqlite3.Connection, case: "EscalationCase") -> None:
+        """Insert an escalation case into the DB. Used by tests."""
+        conn.execute("""
+            INSERT OR IGNORE INTO escalation_cases
+                (case_id, journey_id, policy_number, customer_id, reason, priority,
+                 briefing_note, resolved, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+        """, (
+            case.case_id, case.journey_id, case.policy_number, case.customer_id,
+            case.reason.value, case.priority.value, case.briefing_note,
+            datetime.now().isoformat(),
+        ))
+
+    def _select_agent(self, reason: str, language: str = "en",
+                      priority: str = "p3_normal") -> Optional[dict]:
+        """Select best available agent for the given reason/language/priority.
+        Returns the raw agent dict from self.agents (defaults to MOCK_AGENTS)."""
+        agents = getattr(self, "agents", MOCK_AGENTS)
+        required_skill = REASON_SKILL_MAP.get(reason, "requested_human")
+
+        def _eligible(a: dict) -> bool:
+            return a["available"] and a["load"] < a.get("max_load", 5)
+
+        candidates = [a for a in agents if _eligible(a)]
+        if not candidates:
+            return None
+
+        tier1 = [
+            a for a in candidates
+            if required_skill in a.get("skills", [])
+            and language in a.get("languages", [])
+        ]
+        tier2 = [a for a in candidates if required_skill in a.get("skills", [])]
+
+        if priority == EscalationPriority.P1_URGENT.value:
+            senior_pool = [
+                a for a in (tier1 or tier2 or candidates)
+                if a.get("seniority") in ("senior", "manager")
+            ]
+            pool = senior_pool or tier1 or tier2 or candidates
+        else:
+            pool = tier1 or tier2 or candidates
+
+        pool.sort(key=lambda a: a["load"])
+        return pool[0]
+
+    def _db_resolve_case(self, conn: sqlite3.Connection, case_id: str,
+                         resolution_note: str) -> None:
+        """Mark a case as resolved in the DB. Used by tests."""
+        conn.execute("""
+            UPDATE escalation_cases
+            SET resolved=1, resolution_note=?, resolved_at=?
+            WHERE case_id=?
+        """, (resolution_note, datetime.now().isoformat(), case_id))
 
     def _generate_brief(self, case: EscalationCase) -> str:
         prompt = BRIEF_PROMPT.format(

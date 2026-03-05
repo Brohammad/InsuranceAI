@@ -55,11 +55,26 @@ class CustomerIntent(str, Enum):
 class SentimentResult:
     polarity:        SentimentPolarity
     score:           float             # -1.0 to +1.0
-    intent:          CustomerIntent
+    intent:          CustomerIntent    = CustomerIntent.INTENDING_TO_PAY
     detected_language: str            = "hindi"
     key_topics:      list[str]        = field(default_factory=list)
     confidence:      float            = 0.85
     summary:         str              = ""
+    # Backward-compat fields
+    customer_intent: str              = ""
+    magnitude:       float            = 0.0
+
+    def __post_init__(self):
+        # If old-API caller passed customer_intent string, map it to intent enum
+        if self.customer_intent and self.intent == CustomerIntent.INTENDING_TO_PAY:
+            _map = {
+                "renew":     CustomerIntent.INTENDING_TO_PAY,
+                "complaint": CustomerIntent.ESCALATING,
+                "unknown":   CustomerIntent.IGNORING,
+                "objection": CustomerIntent.OBJECTING,
+                "needs_time":CustomerIntent.NEEDS_TIME,
+            }
+            self.intent = _map.get(self.customer_intent, CustomerIntent.INTENDING_TO_PAY)
 
 
 # ── Mock data ──────────────────────────────────────────────────────────────────

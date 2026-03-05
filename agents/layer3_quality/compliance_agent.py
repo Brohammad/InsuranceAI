@@ -45,13 +45,34 @@ class RuleCheck:
 
 @dataclass
 class ComplianceResult:
-    overall_pass:    bool
-    rules_checked:   int
-    rules_failed:    int
+    # New-API required fields (made optional for backward compat)
+    overall_pass:    bool           = True
+    rules_checked:   int            = 0
+    rules_failed:    int            = 0
     failed_rules:    list[RuleCheck] = field(default_factory=list)
     passed_rules:    list[RuleCheck] = field(default_factory=list)
     corrected_message: str | None   = None
     verdict:         str            = ""
+    # Backward-compat fields used by tests
+    rules_passed:    int            = 0
+    violations:      list[str]      = field(default_factory=list)
+    call_window_ok:  bool           = True
+    disclosure_ok:   bool           = True
+    opt_out_present: bool           = True
+    irdai_compliant: bool           = True
+
+    def __post_init__(self):
+        # Sync: if old-API caller used irdai_compliant to indicate pass/fail
+        if not self.irdai_compliant:
+            self.overall_pass = False
+        # Sync rules_passed ↔ rules_checked/rules_failed
+        if self.rules_passed == 0 and self.rules_checked > 0:
+            self.rules_passed = self.rules_checked - self.rules_failed
+        # Sync violations → rules_failed
+        if self.violations and self.rules_failed == 0:
+            self.rules_failed = len(self.violations)
+            if self.rules_checked == 0:
+                self.rules_checked = self.rules_passed + self.rules_failed
 
 
 # ── IRDAI rule definitions ─────────────────────────────────────────────────────
@@ -271,3 +292,25 @@ class ComplianceAgent:
         )
         logger.info(f"Compliance → {customer.name} | pass={overall} | failed={len(failed)}")
         return result
+
+    # ── Backward-compat alias used by the test suite ─────────────────────────
+
+    def _mock_check(
+        self, message: str, channel: str, customer: Customer,
+    ) -> ComplianceResult:
+        """Alias: run compliance in mock mode with minimal inputs."""
+        from core.models import Policy, PolicyStatus, ProductType
+        from datetime import date
+        stub_policy = Policy(
+            policy_number    = "POL-MOCK",
+            customer_id      = customer.customer_id,
+            product_type     = ProductType.TERM,
+            product_name     = "Mock Policy",
+            sum_assured      = 1_000_000,
+            annual_premium   = 25_000,
+            policy_start_date= date.today(),
+            renewal_due_date = date.today(),
+            tenure_years     = 10,
+            years_completed  = 1,
+        )
+        return _mock_compliance(customer, stub_policy, message)

@@ -234,3 +234,12 @@ class CritiqueAgent:
             f"approved={result.approved} | conversion={result.conversion_likelihood}"
         )
         return result
+
+    # ── Backward-compat alias used by the test suite ─────────────────────────
+
+    def _mock_critique(
+        self, message: str, customer: Customer, policy: "Policy",
+        channel: str = "whatsapp",
+    ) -> "CritiqueResult":
+        """Alias: run mock critique with message as first arg."""
+        return _mock_critique(customer, policy, channel)

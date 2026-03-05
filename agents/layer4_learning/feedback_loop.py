@@ -36,6 +36,9 @@ from rich import box
 
 from core.config import settings
 
+# Module-level import so tests can patch agents.layer4_learning.feedback_loop.PropensityAgent
+from agents.layer1_strategic.propensity import PropensityAgent
+
 
 # ── Outcome signals ───────────────────────────────────────────────────────────
 # Maps InteractionOutcome value → (lapse_score_delta, signal_label)
@@ -87,6 +90,11 @@ class FeedbackSummary:
     opt_outs:                   int = 0
     escalations:                int = 0
     propensity_prompt_refreshed: bool = False  # True if prompt was auto-updated
+
+    @property
+    def score_updates(self) -> int:
+        """Backward-compat alias for policies_improved (used by test suite)."""
+        return self.policies_improved
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -261,10 +269,7 @@ class FeedbackLoopAgent:
         )
 
         # ── Auto-trigger propensity prompt refresh ───────────────────────────
-        # Once enough real outcomes exist the PropensityAgent recalibrates its
-        # Gemini prompt with live few-shot examples — no manual intervention needed.
         try:
-            from agents.layer1_strategic.propensity import PropensityAgent
             _pa = PropensityAgent.__new__(PropensityAgent)   # no Gemini client needed
             _pa.client = None
             _pa.model  = None

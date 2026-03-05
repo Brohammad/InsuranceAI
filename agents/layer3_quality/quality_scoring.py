@@ -32,7 +32,7 @@ from core.config import settings
 from agents.layer3_quality.critique_agent   import CritiqueResult
 from agents.layer3_quality.compliance_agent import ComplianceResult
 from agents.layer3_quality.safety_agent     import SafetyResult, SafetyFlag
-from agents.layer3_quality.sentiment_agent  import SentimentResult, SentimentPolarity
+from agents.layer3_quality.sentiment_agent  import SentimentResult, SentimentPolarity, CustomerIntent
 
 
 # ── Score model ───────────────────────────────────────────────────────────────
@@ -107,20 +107,11 @@ def _score_compliance(c: Optional[ComplianceResult]) -> tuple[float, list[str], 
 def _score_safety(s: Optional[SafetyResult]) -> tuple[float, list[str], list[str]]:
     if s is None:
         return 100.0, ["No safety flags"], []
-    penalty_map = {
-        SafetyFlag.CLEAR:              0,
-        SafetyFlag.VULNERABLE:        10,
-        SafetyFlag.FINANCIAL_STRESS:  20,
-        SafetyFlag.EMOTIONAL_DISTRESS:35,
-        SafetyFlag.BEREAVEMENT:       35,
-        SafetyFlag.MIS_SELLING:       60,
-        SafetyFlag.CRISIS:            80,
-    }
-    penalty   = penalty_map.get(s.flag, 0)
-    score     = max(0.0, 100.0 - penalty)
-    strengths = ["No safety concerns"] if s.flag == SafetyFlag.CLEAR else []
-    improvements = [f"Safety flag '{s.flag.value}' detected — {s.agent_note}"] if s.flag != SafetyFlag.CLEAR else []
-    return score, strengths, improvements
+    # Any non-CLEAR flag zeroes the safety component entirely
+    if s.flag != SafetyFlag.CLEAR:
+        improvements = [f"Safety flag '{s.flag.value}' detected — {s.agent_note}"] if s.agent_note else [f"Safety flag '{s.flag.value}' detected"]
+        return 0.0, [], improvements
+    return 100.0, ["No safety concerns"], []
 
 
 def _score_sentiment(s: Optional[SentimentResult]) -> tuple[float, list[str], list[str]]:
@@ -241,3 +232,47 @@ class QualityScoringAgent:
         conn.commit()
         conn.close()
         logger.debug(f"Quality score {qs.score_id} saved to DB")
+
+
+# ── Backward-compat function alias ───────────────────────────────────────────
+# Tests import: from agents.layer3_quality.quality_scoring import compute_quality_score
+# The old API accepted old-style dataclasses with different field names.
+# We translate them here before delegating to QualityScoringAgent.score().
+
+def compute_quality_score(
+    journey_id:    str,
+    policy_number: str,
+    customer_name: str,
+    channel:       str,
+    critique:   Optional[CritiqueResult]   = None,
+    compliance: Optional[ComplianceResult] = None,
+    safety:     Optional[SafetyResult]     = None,
+    sentiment:  Optional[SentimentResult]  = None,
+) -> "QualityScore":
+    """
+    Backward-compatible wrapper around QualityScoringAgent.score().
+
+    The test suite passes old-style dataclasses that use different field names
+    (e.g. SafetyResult(is_safe=True, flags=[]) or
+          ComplianceResult(rules_passed=3, violations=[])).
+    This function translates those to the current dataclass shapes before scoring.
+    """
+    # ── Translate SafetyResult (old: is_safe/distress_detected/flags/severity) ──
+    # No translation needed — SafetyResult.__post_init__ syncs is_safe ↔ flag
+
+    # ── Translate ComplianceResult (old: rules_passed/violations/call_window_ok) ──
+    # No translation needed — ComplianceResult.__post_init__ syncs the fields
+
+    # ── Translate SentimentResult (old: magnitude/customer_intent) ──
+    # No translation needed — SentimentResult.__post_init__ handles customer_intent mapping
+
+    return QualityScoringAgent().score(
+        journey_id    = journey_id,
+        policy_number = policy_number,
+        customer_name = customer_name,
+        channel       = channel,
+        critique      = critique,
+        compliance    = compliance,
+        safety        = safety,
+        sentiment     = sentiment,
+    )

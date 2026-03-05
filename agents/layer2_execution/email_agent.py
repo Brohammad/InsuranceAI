@@ -200,3 +200,23 @@ class EmailAgent:
             f"Email sent {msg_id} → {customer.name} | outcome={outcome.value} | mock={self.mock}"
         )
         return result, interaction
+
+    # ── Backward-compat alias used by the test suite ─────────────────────────
+
+    def _mock_send(
+        self, customer: Customer, policy: Policy,
+        tone: str = "professional", strategy: str = "renewal_reminder",
+    ) -> "EmailResult":
+        """Alias: runs the agent in mock mode and returns just the result."""
+        days    = max((policy.renewal_due_date - date.today()).days, 0)
+        content = self._generate_email(customer, policy, tone, strategy, days)
+        outcome = mock_outcome(Channel.EMAIL)
+        return EmailResult(
+            message_id = mock_delivery_id("EMAIL"),
+            subject    = content["subject"],
+            body       = content["body"],
+            outcome    = outcome,
+            sentiment  = mock_sentiment(outcome),
+            sent_at    = datetime.now(),
+            mock       = True,
+        )

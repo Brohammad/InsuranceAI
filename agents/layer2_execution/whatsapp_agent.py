@@ -183,3 +183,31 @@ class WhatsAppAgent:
             f"WA sent {msg_id} → {customer.name} | outcome={outcome.value} | mock={self.mock}"
         )
         return result, interaction
+
+    # ── Backward-compat aliases used by the test suite ──────────────────────
+
+    def _mock_send(
+        self, customer: Customer, policy: Policy,
+        tone: str = "friendly", strategy: str = "renewal_reminder",
+    ) -> "WhatsAppResult":
+        """Alias: runs the agent in mock mode and returns just the result (no Interaction)."""
+        days = max((policy.renewal_due_date - date.today()).days, 0)
+        body = self._generate_message(customer, policy, tone, strategy, days)
+        outcome = mock_outcome(Channel.WHATSAPP)
+        return WhatsAppResult(
+            message_id   = mock_delivery_id("WA"),
+            message_body = body,
+            outcome      = outcome,
+            sentiment    = mock_sentiment(outcome),
+            delivered_at = datetime.now(),
+            mock         = True,
+        )
+
+    def send(
+        self, customer: Customer, policy: Policy,
+        tone: str = "friendly", strategy: str = "renewal_reminder",
+        journey_id: str = "J-TEST",
+    ) -> "WhatsAppResult":
+        """Alias: generates message via Gemini and returns result (no Interaction)."""
+        result, _ = self.run(customer, policy, journey_id=journey_id, tone=tone, strategy=strategy)
+        return result

@@ -22,9 +22,9 @@ build/
 .env
 .streamlit/secrets.toml
 
-# DB (runtime artefact)
+# DB (runtime artefact — never commit the DB itself, but DO track schema version)
 data/renewai.db
-data/.schema_version
+# data/.schema_version  ← intentionally tracked so Streamlit Cloud detects schema bumps
 
 # generated reports (large, auto-generated)
 outputs/reports/

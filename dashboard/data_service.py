@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import streamlit as st
 
 # ── Resolve DB path ────────────────────────────────────────────────────────────
 _ROOT = Path(__file__).resolve().parent.parent
@@ -87,6 +88,7 @@ _migrate()
 
 # ── Overview KPIs ─────────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=5)
 def get_overview_kpis() -> dict[str, Any]:
     """Return headline numbers for the Overview page."""
     defaults: dict[str, Any] = {
@@ -137,6 +139,7 @@ def get_overview_kpis() -> dict[str, Any]:
 
 # ── Journey funnel ─────────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=5)
 def get_journey_funnel() -> pd.DataFrame:
     try:
         with _conn() as conn:
@@ -149,6 +152,7 @@ def get_journey_funnel() -> pd.DataFrame:
         return pd.DataFrame()
 
 
+@st.cache_data(ttl=5)
 def get_recent_journeys(limit: int = 50) -> pd.DataFrame:
     try:
         with _conn() as conn:
@@ -168,6 +172,7 @@ def get_recent_journeys(limit: int = 50) -> pd.DataFrame:
 
 # ── Channel breakdown ──────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=5)
 def get_channel_stats() -> pd.DataFrame:
     try:
         with _conn() as conn:
@@ -183,6 +188,7 @@ def get_channel_stats() -> pd.DataFrame:
         return pd.DataFrame()
 
 
+@st.cache_data(ttl=5)
 def get_interaction_timeline() -> pd.DataFrame:
     try:
         with _conn() as conn:
@@ -198,6 +204,7 @@ def get_interaction_timeline() -> pd.DataFrame:
 
 # ── Quality scores ─────────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=5)
 def get_quality_distribution() -> pd.DataFrame:
     try:
         with _conn() as conn:
@@ -209,6 +216,7 @@ def get_quality_distribution() -> pd.DataFrame:
         return pd.DataFrame()
 
 
+@st.cache_data(ttl=5)
 def get_quality_trend() -> pd.DataFrame:
     try:
         with _conn() as conn:
@@ -222,6 +230,7 @@ def get_quality_trend() -> pd.DataFrame:
         return pd.DataFrame()
 
 
+@st.cache_data(ttl=5)
 def get_recent_quality_scores(limit: int = 30) -> pd.DataFrame:
     try:
         with _conn() as conn:
@@ -238,6 +247,7 @@ def get_recent_quality_scores(limit: int = 30) -> pd.DataFrame:
 
 # ── Customer table ─────────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=5)
 def get_customers(search: str = "") -> pd.DataFrame:
     try:
         with _conn() as conn:
@@ -267,6 +277,7 @@ def get_customers(search: str = "") -> pd.DataFrame:
         return pd.DataFrame()
 
 
+@st.cache_data(ttl=5)
 def get_customer_detail(customer_id: str) -> dict[str, Any]:
     try:
         with _conn() as conn:
@@ -290,6 +301,7 @@ def get_customer_detail(customer_id: str) -> dict[str, Any]:
 
 # ── Segment breakdown ──────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=5)
 def get_segment_breakdown() -> pd.DataFrame:
     try:
         with _conn() as conn:
@@ -310,6 +322,7 @@ def get_segment_breakdown() -> pd.DataFrame:
 
 # ── Escalation queue ───────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=5)
 def get_open_escalations() -> pd.DataFrame:
     try:
         with _conn() as conn:
@@ -338,6 +351,7 @@ def get_open_escalations() -> pd.DataFrame:
         return pd.DataFrame()
 
 
+@st.cache_data(ttl=5)
 def get_escalation_resolution_rate() -> dict[str, int]:
     try:
         with _conn() as conn:
@@ -350,6 +364,7 @@ def get_escalation_resolution_rate() -> dict[str, int]:
 
 # ── A/B test results ───────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=5)
 def get_ab_results() -> pd.DataFrame:
     try:
         with _conn() as conn:
@@ -361,6 +376,7 @@ def get_ab_results() -> pd.DataFrame:
 
 # ── Policies due soon ──────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=5)
 def get_policies_due(days: int = 30) -> pd.DataFrame:
     try:
         with _conn() as conn:

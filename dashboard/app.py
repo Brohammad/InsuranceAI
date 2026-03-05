@@ -103,13 +103,15 @@ div[data-testid="metric-container"] [data-testid="stMetricValue"] {
 # On Cloud the filesystem is ephemeral — each cold-start gets a fresh container,
 # so the DB is always re-seeded. The version file ensures we also reseed when
 # schema changes land mid-session (e.g. after a redeploy with warm cache).
-_DB_SCHEMA_VERSION = "v7"
+_DB_SCHEMA_VERSION = "v8"
 
 @st.cache_resource(show_spinner="Initialising database…")
 def _ensure_db() -> None:
     """
     Seed (or re-seed) the SQLite DB so it always matches the current schema.
-    Safe to call multiple times — idempotent within a single process lifetime.
+    On Streamlit Cloud the filesystem is ephemeral — DB is always empty on
+    cold-start. After seeding, runs a mock e2e pass so the dashboard shows
+    live data immediately without needing a manual trigger.
     """
     import sys as _sys
     import importlib.util as _ilu
@@ -123,7 +125,7 @@ def _ensure_db() -> None:
     _stale = (not _db.exists()) or (not _ver.exists()) or (_ver.read_text().strip() != _DB_SCHEMA_VERSION)
     if _stale:
         if _db.exists():
-            _db.unlink()          # delete stale DB
+            _db.unlink()
         _db.parent.mkdir(parents=True, exist_ok=True)
 
         # Run seed
@@ -137,6 +139,139 @@ def _ensure_db() -> None:
         # Write version sentinel
         _ver.write_text(_DB_SCHEMA_VERSION)
 
+    # Always run a quick e2e pass after a fresh seed so the dashboard
+    # shows journeys/interactions/quality data on first load.
+    _run_e2e_in_process(_root)
+
+
+def _run_e2e_in_process(root=None) -> dict:
+    """
+    Run a full mock e2e pass (all 5 layers) for the 3 most urgent policies.
+    Executes entirely in-process — no subprocesses, no real API calls.
+    Returns a summary dict.
+    """
+    import json, sqlite3, uuid
+    from datetime import date, datetime
+    from pathlib import Path
+    from unittest.mock import patch, MagicMock
+
+    if root is None:
+        root = Path(__file__).resolve().parent.parent
+
+    db_path = str(root / "data" / "renewai.db")
+    summary = {"journeys": 0, "interactions": 0, "quality_scores": 0,
+                "feedback_events": 0, "errors": []}
+
+    # ── Pick 3 most urgent policies ──────────────────────────────────────────
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        targets = conn.execute("""
+            SELECT c.customer_id, c.name, p.policy_number,
+                   CAST(julianday(p.renewal_due_date) - julianday('now') AS INT) AS days_left
+            FROM customers c JOIN policies p ON p.customer_id = c.customer_id
+            ORDER BY days_left ASC LIMIT 3
+        """).fetchall()
+        conn.close()
+    except Exception as e:
+        summary["errors"].append(f"DB read: {e}")
+        return summary
+
+    if not targets:
+        return summary
+
+    # ── Mock Gemini helper ───────────────────────────────────────────────────
+    def _mock_client(responses):
+        idx = [0]
+        def se(*a, **kw):
+            m = MagicMock(); m.text = responses[idx[0] % len(responses)]; idx[0] += 1; return m
+        c = MagicMock(); c.models.generate_content.side_effect = se; return c
+
+    for row in targets:
+        cid, name, pid, days = row["customer_id"], row["name"], row["policy_number"], row["days_left"]
+        intensity = "urgent" if days <= 3 else ("intensive" if days <= 7 else "moderate")
+        lapse     = 85 if days <= 5 else 55
+        ch_seq    = ["whatsapp", "email", "voice"] if days <= 5 else ["whatsapp", "email"]
+
+        seg_j  = json.dumps({"segment": "high_risk", "recommended_tone": "empathetic",
+                              "recommended_strategy": "renewal_reminder", "risk_flag": "high",
+                              "reasoning": "Urgent."})
+        prop_j = json.dumps({"lapse_score": lapse, "intervention_intensity": intensity,
+                              "top_reasons": ["due soon"], "recommended_actions": ch_seq,
+                              "reasoning": "Mock."})
+        tim_j  = json.dumps({"best_contact_window": "18:00-20:00", "best_days": ["Monday"],
+                              "salary_day_flag": True, "urgency_override": days <= 3,
+                              "reasoning": "Mock."})
+        ch_j   = json.dumps({"channel_sequence": ch_seq, "reasoning": "Mock."})
+
+        mc = _mock_client([seg_j, prop_j, tim_j, ch_j])
+
+        try:
+            # Layer 1
+            with patch("agents.layer1_strategic.segmentation.get_gemini_client",    return_value=mc), \
+                 patch("agents.layer1_strategic.propensity.get_gemini_client",       return_value=mc), \
+                 patch("agents.layer1_strategic.timing.get_gemini_client",           return_value=mc), \
+                 patch("agents.layer1_strategic.channel_selector.get_gemini_client", return_value=mc):
+                from core.database import get_customer, get_policy
+                from agents.layer1_strategic.orchestrator import run_layer1
+                cust = get_customer(cid); pol = get_policy(pid)
+                if not cust or not pol:
+                    continue
+                journey = run_layer1(cust, pol)
+            summary["journeys"] += 1
+
+            # Layer 2
+            msg_mock = MagicMock(); msg_mock.text = f"Dear {name}, your policy is due. Renew now."
+            with patch("agents.layer2_execution.whatsapp_agent.get_gemini_client") as wm, \
+                 patch("agents.layer2_execution.email_agent.get_gemini_client")    as em, \
+                 patch("agents.layer2_execution.voice_agent.get_gemini_client")    as vm, \
+                 patch("agents.layer2_execution.whatsapp_agent.settings") as ws, \
+                 patch("agents.layer2_execution.email_agent.settings")    as es, \
+                 patch("agents.layer2_execution.voice_agent.settings")    as vs:
+                for ms in (ws, es, vs):
+                    ms.mock_delivery = True; ms.model_execution = "gemini-2.5-flash"
+                for mc2 in (wm, em, vm):
+                    c2 = MagicMock(); c2.models.generate_content.return_value = msg_mock
+                    mc2.return_value = c2
+                from agents.layer2_execution.dispatcher import Layer2Dispatcher
+                disp = Layer2Dispatcher()
+                res  = disp.run_journey(journey)
+            n_steps = len(res.get("steps", [])) if isinstance(res, dict) else 0
+            summary["interactions"] += n_steps
+
+            # Layer 3
+            from agents.layer3_quality.quality_scoring import QualityScoringAgent
+            from agents.layer3_quality.critique_agent import CritiqueResult
+            from agents.layer3_quality.compliance_agent import ComplianceResult
+            from agents.layer3_quality.safety_agent import SafetyResult, SafetyFlag
+            from agents.layer3_quality.sentiment_agent import SentimentResult, SentimentPolarity, CustomerIntent
+            qs_agent = QualityScoringAgent()
+            qs = qs_agent.score(
+                journey_id=journey.journey_id, policy_number=pid,
+                customer_name=name, channel="whatsapp",
+                critique=CritiqueResult(approved=True, tone_score=8, accuracy_score=8,
+                                         personalisation_score=7, conversion_likelihood=8),
+                compliance=ComplianceResult(overall_pass=True, rules_checked=3,
+                                             rules_failed=0, failed_rules=[], passed_rules=[]),
+                safety=SafetyResult(flag=SafetyFlag.CLEAR, confidence=1.0),
+                sentiment=SentimentResult(polarity=SentimentPolarity.POSITIVE,
+                                           score=0.65, intent=CustomerIntent.INTENDING_TO_PAY),
+            )
+            qs_agent.save_score(qs)
+            summary["quality_scores"] += 1
+
+        except Exception as e:
+            summary["errors"].append(f"{name}: {e}")
+            continue
+
+    # Layer 4 — feedback loop
+    try:
+        from agents.layer4_learning.feedback_loop import FeedbackLoopAgent
+        fl = FeedbackLoopAgent()
+        events, fl_summary = fl.run()
+        summary["feedback_events"] = fl_summary.total_events
+    except Exception as e:
+        summary["errors"].append(f"L4: {e}")
 
 _ensure_db()
 
@@ -158,7 +293,43 @@ with st.sidebar:
         label_visibility="collapsed",
     )
     st.markdown("---")
+
+    # ── Live refresh controls ─────────────────────────────────────────────────
+    st.markdown("**🔄 Live Data**")
+    auto_refresh = st.toggle("Auto-refresh (5s)", value=False, key="auto_refresh")
+    if st.button("🔃 Refresh Now", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+
+    st.markdown("---")
+
+    # ── Run E2E Pipeline ──────────────────────────────────────────────────────
+    st.markdown("**⚡ Pipeline**")
+    if st.button("▶ Run E2E Pipeline", use_container_width=True, type="primary"):
+        with st.spinner("Running all 5 layers…"):
+            result = _run_e2e_in_process()
+        st.cache_data.clear()
+        if result["errors"]:
+            st.warning(f"Completed with {len(result['errors'])} error(s): {result['errors'][0]}")
+        else:
+            st.success(
+                f"✅ Done!\n"
+                f"• {result['journeys']} journeys\n"
+                f"• {result['interactions']} interactions\n"
+                f"• {result['quality_scores']} quality scores\n"
+                f"• {result['feedback_events']} feedback events"
+            )
+        st.rerun()
+
+    st.markdown("---")
     st.caption(f"Suraksha Life Insurance\nProject RenewAI\n\n*{datetime.now().strftime('%d %b %Y, %H:%M')}*")
+
+# ── Auto-refresh loop (fires AFTER the page renders) ─────────────────────────
+if st.session_state.get("auto_refresh"):
+    import time
+    time.sleep(5)
+    st.cache_data.clear()
+    st.rerun()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

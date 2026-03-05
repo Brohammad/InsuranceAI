@@ -69,6 +69,15 @@ def _ensure_optional_tables() -> None:
 # Ensure optional tables exist as soon as this module is imported
 try:
     _ensure_optional_tables()
+    # Migrate: add agent_name to escalation_cases if missing (added after initial deploy)
+    with _conn() as _mc:
+        _cols = {r[1] for r in _mc.execute("PRAGMA table_info(escalation_cases)").fetchall()}
+        if "agent_name" not in _cols:
+            try:
+                _mc.execute("ALTER TABLE escalation_cases ADD COLUMN agent_name TEXT")
+                _mc.commit()
+            except Exception:
+                pass
 except Exception:
     pass  # DB may not exist yet — _ensure_db() in app.py handles that
 
@@ -277,10 +286,13 @@ def get_segment_breakdown() -> pd.DataFrame:
 
 def get_open_escalations() -> pd.DataFrame:
     with _conn() as conn:
-        rows = conn.execute("""
+        # agent_name was added later — use a safe fallback for older DBs
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(escalation_cases)").fetchall()}
+        agent_col = "ec.agent_name" if "agent_name" in cols else "NULL AS agent_name"
+        rows = conn.execute(f"""
             SELECT ec.case_id, ec.policy_number, c.name AS customer_name,
                    ec.reason, ec.priority, ec.briefing_note,
-                   ec.assigned_to, ec.agent_name,
+                   ec.assigned_to, {agent_col},
                    ec.created_at, ec.sla_deadline
             FROM escalation_cases ec
             LEFT JOIN customers c ON c.customer_id = ec.customer_id

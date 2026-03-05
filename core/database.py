@@ -143,6 +143,7 @@ CREATE TABLE IF NOT EXISTS escalation_cases (
     priority         TEXT,
     briefing_note    TEXT,
     assigned_to      TEXT,
+    agent_name       TEXT,
     resolved         INTEGER DEFAULT 0,
     resolved_at      TEXT,
     resolution_note  TEXT,

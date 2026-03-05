@@ -110,8 +110,8 @@ def _ensure_db() -> None:
     """
     Seed (or re-seed) the SQLite DB so it always matches the current schema.
     On Streamlit Cloud the filesystem is ephemeral — DB is always empty on
-    cold-start. After seeding, runs a mock e2e pass so the dashboard shows
-    live data immediately without needing a manual trigger.
+    cold-start.  This function is cached with @st.cache_resource so it runs
+    exactly ONCE per container lifetime (not once per user session).
     """
     import sys as _sys
     import importlib.util as _ilu
@@ -139,9 +139,24 @@ def _ensure_db() -> None:
         # Write version sentinel
         _ver.write_text(_DB_SCHEMA_VERSION)
 
-    # Always run a quick e2e pass after a fresh seed so the dashboard
-    # shows journeys/interactions/quality data on first load.
+    # Run initial e2e pass right after seeding so there is fresh data
+    # on the very first page load (seed only gives static baseline).
     _run_e2e_in_process(_root)
+
+
+def _maybe_run_e2e() -> None:
+    """
+    Run _run_e2e_in_process() at most once every 30 minutes per session,
+    and always on the very first page load of each session.
+    This keeps Cloud data fresh without hammering the DB on every rerun.
+    """
+    import time as _time
+    _now = _time.time()
+    _last = st.session_state.get("_e2e_last_run", 0)
+    _interval = 30 * 60  # 30 minutes
+    if _now - _last >= _interval:
+        _run_e2e_in_process()
+        st.session_state["_e2e_last_run"] = _now
 
 
 def _run_e2e_in_process(root=None) -> dict:
@@ -162,16 +177,31 @@ def _run_e2e_in_process(root=None) -> dict:
     summary = {"journeys": 0, "interactions": 0, "quality_scores": 0,
                 "feedback_events": 0, "errors": []}
 
-    # ── Pick 3 most urgent policies ──────────────────────────────────────────
+    # ── Pick up to 3 policies that have NO journey in the last 24 hours ─────
+    # This prevents the same 3 policies from being skipped/duplicated on every
+    # Cloud visit when the e2e runner fires again on a warm container.
     try:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         targets = conn.execute("""
             SELECT c.customer_id, c.name, p.policy_number,
                    CAST(julianday(p.renewal_due_date) - julianday('now') AS INT) AS days_left
-            FROM customers c JOIN policies p ON p.customer_id = c.customer_id
+            FROM customers c
+            JOIN policies p ON p.customer_id = c.customer_id
+            WHERE p.policy_number NOT IN (
+                SELECT DISTINCT policy_number FROM renewal_journeys
+                WHERE created_at >= datetime('now', '-24 hours')
+            )
             ORDER BY days_left ASC LIMIT 3
         """).fetchall()
+        # Fallback: if all policies have recent journeys, just pick the 3 most urgent
+        if not targets:
+            targets = conn.execute("""
+                SELECT c.customer_id, c.name, p.policy_number,
+                       CAST(julianday(p.renewal_due_date) - julianday('now') AS INT) AS days_left
+                FROM customers c JOIN policies p ON p.customer_id = c.customer_id
+                ORDER BY days_left ASC LIMIT 3
+            """).fetchall()
         conn.close()
     except Exception as e:
         summary["errors"].append(f"DB read: {e}")
@@ -288,7 +318,8 @@ def _run_e2e_in_process(root=None) -> dict:
     summary["payments_received"] = paid_count
     return summary
 
-_ensure_db()
+_ensure_db()          # runs once per container — seeds DB + initial e2e pass
+_maybe_run_e2e()      # runs every 30 min per session — keeps data fresh on Cloud
 
 
 # ── Sidebar nav ───────────────────────────────────────────────────────────────
@@ -339,12 +370,15 @@ with st.sidebar:
     st.markdown("---")
     st.caption(f"Suraksha Life Insurance\nProject RenewAI\n\n*{datetime.now().strftime('%d %b %Y, %H:%M')}*")
 
-# ── Auto-refresh loop (fires AFTER the page renders) ─────────────────────────
+# ── Auto-refresh (fires AFTER the page renders) ───────────────────────────────
+# Use JS meta-refresh instead of time.sleep() — sleep blocks the Streamlit
+# worker thread on Cloud and can cause the app to appear frozen/unresponsive.
 if st.session_state.get("auto_refresh"):
-    import time
-    time.sleep(5)
+    st.markdown(
+        '<meta http-equiv="refresh" content="10">',
+        unsafe_allow_html=True,
+    )
     st.cache_data.clear()
-    st.rerun()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

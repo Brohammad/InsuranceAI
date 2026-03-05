@@ -97,6 +97,32 @@ div[data-testid="metric-container"] [data-testid="stMetricValue"] {
 </style>
 """, unsafe_allow_html=True)
 
+
+# ── Auto-seed DB if missing (needed on Streamlit Community Cloud) ─────────────
+@st.cache_resource(show_spinner="Initialising database…")
+def _ensure_db() -> None:
+    """Create and seed the SQLite DB if it doesn't exist yet."""
+    from pathlib import Path as _Path
+    import sys as _sys
+    _db = _Path(__file__).resolve().parent.parent / "data" / "renewai.db"
+    if not _db.exists():
+        _db.parent.mkdir(parents=True, exist_ok=True)
+        # Run seed.py programmatically
+        import importlib.util as _ilu
+        _spec = _ilu.spec_from_file_location(
+            "seed",
+            _Path(__file__).resolve().parent.parent / "data" / "seed.py",
+        )
+        _mod = _ilu.module_from_spec(_spec)
+        try:
+            _spec.loader.exec_module(_mod)
+        except SystemExit:
+            pass  # seed.py may call sys.exit(0) — that's fine
+
+
+_ensure_db()
+
+
 # ── Sidebar nav ───────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown('<div class="sidebar-brand">🛡️ RenewAI Admin</div>', unsafe_allow_html=True)
@@ -641,7 +667,28 @@ elif page == "⚙️  Settings":
         if rows:
             st.dataframe(pd.DataFrame(rows), use_container_width=True, height=400)
     else:
-        st.warning(".env file not found.")
+        # Running on Streamlit Cloud — show active env vars instead
+        st.subheader("Active Environment Variables")
+        st.caption("Running on Streamlit Cloud — .env not present. Showing active configuration (keys masked).")
+        import os as _os
+        tracked_keys = [
+            "GEMINI_API_KEY", "MOCK_DELIVERY", "GEMINI_MODEL_ORCHESTRATOR",
+            "GEMINI_MODEL_EXECUTION", "GEMINI_MODEL_CRITIQUE", "GEMINI_MODEL_SAFETY",
+            "GEMINI_MODEL_CLASSIFY", "GEMINI_MODEL_REPORT", "DB_PATH",
+            "TWILIO_ACCOUNT_SID", "RAZORPAY_KEY_ID", "ELEVENLABS_API_KEY", "SARVAM_API_KEY",
+        ]
+        rows = []
+        for key in tracked_keys:
+            val = _os.environ.get(key, "")
+            if not val:
+                continue
+            sensitive = any(k in key.upper() for k in ["KEY","SECRET","TOKEN","SID","PASSWORD"])
+            display_val = f"{val[:4]}{'*' * max(0, len(val)-4)}" if sensitive and len(val) > 4 else val
+            rows.append({"Key": key, "Value": display_val})
+        if rows:
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, height=400)
+        else:
+            st.warning("No environment variables found. Add secrets in Streamlit Cloud → App Settings → Secrets.")
 
     st.divider()
     st.subheader("Agent Model Config")

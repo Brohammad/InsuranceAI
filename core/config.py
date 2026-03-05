@@ -13,6 +13,7 @@ Model strategy (from chatpwc.txt architecture):
   REPORT        → gemini-3-flash-preview   (summaries, dashboards)
 """
 
+import os
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
@@ -21,6 +22,26 @@ from google import genai
 
 # ── Resolve project root ──────────────────────────────────────────────────────
 ROOT_DIR = Path(__file__).resolve().parent.parent
+
+
+# ── Streamlit Cloud: inject st.secrets into os.environ before Settings loads ──
+def _inject_streamlit_secrets() -> None:
+    """
+    When running on Streamlit Community Cloud, secrets defined in the
+    App Settings → Secrets UI are available via st.secrets.
+    Inject them into os.environ so pydantic-settings picks them up.
+    This is a no-op locally (st.secrets will be empty or unavailable).
+    """
+    try:
+        import streamlit as st  # noqa: PLC0415
+        for key, value in st.secrets.items():
+            if isinstance(value, str) and key not in os.environ:
+                os.environ[key] = value
+    except Exception:
+        pass  # Not running under Streamlit, or no secrets configured
+
+
+_inject_streamlit_secrets()
 
 
 class Settings(BaseSettings):

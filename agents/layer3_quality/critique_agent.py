@@ -176,7 +176,48 @@ class CritiqueAgent:
         # Strip markdown code fences if present
         raw = re.sub(r"^```(?:json)?\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw)
-        data = json.loads(raw)
+
+        # Robust JSON parsing: try direct load, then attempt to extract
+        # a JSON object from model output if the model added prose.
+        try:
+            data = json.loads(raw)
+        except Exception:
+            logger.warning("CritiqueAgent: direct JSON parse failed, attempting to extract JSON object from model output")
+            m = re.search(r"(\{.*\})", raw, re.DOTALL)
+            if m:
+                try:
+                    data = json.loads(m.group(1))
+                except Exception:
+                    logger.exception("CritiqueAgent: failed to parse extracted JSON; falling back to empty result")
+                    data = {}
+            else:
+                logger.warning("CritiqueAgent: no JSON object found in model output; falling back to empty result")
+                data = {}
+
+        # Normalize fields to avoid validation errors (models may return dicts/lists)
+        issues = data.get("issues", [])
+        if isinstance(issues, str):
+            issues = [issues]
+        elif issues is None:
+            issues = []
+
+        rewrite = data.get("rewrite")
+        if isinstance(rewrite, dict):
+            # Common case: model returns {'subject':..., 'body':...}
+            if "subject" in rewrite and "body" in rewrite:
+                rewrite = f"{rewrite.get('subject','').strip()}\n\n{rewrite.get('body','').strip()}".strip()
+            else:
+                # Fallback: stringify the dict
+                try:
+                    rewrite = json.dumps(rewrite, ensure_ascii=False)
+                except Exception:
+                    rewrite = str(rewrite)
+        elif isinstance(rewrite, list):
+            rewrite = "\n".join(str(x) for x in rewrite)
+        elif rewrite is None:
+            rewrite = None
+        else:
+            rewrite = str(rewrite)
 
         result = CritiqueResult(
             approved              = bool(data.get("approved", False)),
@@ -184,8 +225,8 @@ class CritiqueAgent:
             accuracy_score        = int(data.get("accuracy_score", 5)),
             personalisation_score = int(data.get("personalisation_score", 5)),
             conversion_likelihood = int(data.get("conversion_likelihood", 5)),
-            issues                = data.get("issues", []),
-            rewrite               = data.get("rewrite"),
+            issues                = issues,
+            rewrite               = rewrite,
             overall_verdict       = data.get("overall_verdict", ""),
         )
         logger.info(

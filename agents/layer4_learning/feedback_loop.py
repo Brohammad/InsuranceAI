@@ -124,6 +124,24 @@ def _load_interactions(conn: sqlite3.Connection) -> list[dict]:
 
 def _load_quality_scores(conn: sqlite3.Connection) -> dict[str, float]:
     """Returns {journey_id: avg_quality_score}."""
+    # Ensure the table exists even if Layer 3 hasn't run yet
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS quality_scores (
+            score_id      TEXT PRIMARY KEY,
+            journey_id    TEXT,
+            policy_number TEXT,
+            customer_name TEXT,
+            channel       TEXT,
+            critique_score    REAL,
+            compliance_score  REAL,
+            safety_score      REAL,
+            sentiment_score   REAL,
+            total_score       REAL,
+            grade             TEXT,
+            created_at        TEXT
+        )
+    """)
+    conn.commit()
     rows = conn.execute("""
         SELECT journey_id, AVG(total_score) as avg_score
         FROM quality_scores

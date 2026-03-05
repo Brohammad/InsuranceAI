@@ -225,17 +225,60 @@ class SentimentAgent:
             contents = prompt,
         )
         raw = response.text.strip()
+        # remove fenced code blocks if the model wrapped JSON in ```json ```
         raw = re.sub(r"^```(?:json)?\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw)
-        data   = json.loads(raw)
+
+        # Robust JSON parsing: try direct load, then attempt to extract
+        # a JSON object from the model text if the model added prose.
+        try:
+            data = json.loads(raw)
+        except Exception:
+            logger.warning("SentimentAgent: direct JSON parse failed, attempting to extract JSON object from model output")
+            m = re.search(r"(\{.*\})", raw, re.DOTALL)
+            if m:
+                try:
+                    data = json.loads(m.group(1))
+                except Exception:
+                    logger.exception("SentimentAgent: failed to parse extracted JSON; falling back to neutral result")
+                    data = {}
+            else:
+                logger.warning("SentimentAgent: no JSON object found in model output; falling back to neutral result")
+                data = {}
+        # Safely coerce model outputs into enums/expected types with
+        # sensible defaults if the model returned null/invalid values.
+        pol = data.get("polarity") or "neutral"
+        try:
+            polarity_val = SentimentPolarity(pol)
+        except Exception:
+            polarity_val = SentimentPolarity.NEUTRAL
+
+        try:
+            score_val = float(data.get("score", 0.0) or 0.0)
+        except Exception:
+            score_val = 0.0
+
+        intent_raw = data.get("intent") or "ignoring"
+        try:
+            intent_val = CustomerIntent(intent_raw)
+        except Exception:
+            intent_val = CustomerIntent.IGNORING
+
+        detected_language = data.get("detected_language") or "hindi"
+        key_topics = data.get("key_topics") or []
+        try:
+            confidence_val = float(data.get("confidence", 0.8) or 0.8)
+        except Exception:
+            confidence_val = 0.8
+
         result = SentimentResult(
-            polarity          = SentimentPolarity(data.get("polarity", "neutral")),
-            score             = float(data.get("score", 0.0)),
-            intent            = CustomerIntent(data.get("intent", "ignoring")),
-            detected_language = data.get("detected_language", "hindi"),
-            key_topics        = data.get("key_topics", []),
-            confidence        = float(data.get("confidence", 0.8)),
-            summary           = data.get("summary", ""),
+            polarity=polarity_val,
+            score=score_val,
+            intent=intent_val,
+            detected_language=detected_language,
+            key_topics=key_topics,
+            confidence=confidence_val,
+            summary=data.get("summary", ""),
         )
         logger.info(
             f"Sentiment → {customer.name} | polarity={result.polarity.value} | "

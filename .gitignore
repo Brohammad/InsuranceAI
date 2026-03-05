@@ -20,6 +20,7 @@ build/
 
 # env / secrets
 .env
+.streamlit/secrets.toml
 
 # DB (runtime artefact)
 data/renewai.db

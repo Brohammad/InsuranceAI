@@ -102,22 +102,23 @@ div[data-testid="metric-container"] [data-testid="stMetricValue"] {
 @st.cache_resource(show_spinner="Initialising database…")
 def _ensure_db() -> None:
     """Create and seed the SQLite DB if it doesn't exist yet."""
-    from pathlib import Path as _Path
     import sys as _sys
+    from pathlib import Path as _Path
     _db = _Path(__file__).resolve().parent.parent / "data" / "renewai.db"
     if not _db.exists():
         _db.parent.mkdir(parents=True, exist_ok=True)
-        # Run seed.py programmatically
+        # Import seed module and call seed() directly
+        _root = str(_Path(__file__).resolve().parent.parent)
+        if _root not in _sys.path:
+            _sys.path.insert(0, _root)
         import importlib.util as _ilu
         _spec = _ilu.spec_from_file_location(
             "seed",
             _Path(__file__).resolve().parent.parent / "data" / "seed.py",
         )
         _mod = _ilu.module_from_spec(_spec)
-        try:
-            _spec.loader.exec_module(_mod)
-        except SystemExit:
-            pass  # seed.py may call sys.exit(0) — that's fine
+        _spec.loader.exec_module(_mod)
+        _mod.seed()  # explicitly call seed()
 
 
 _ensure_db()

@@ -103,7 +103,7 @@ div[data-testid="metric-container"] [data-testid="stMetricValue"] {
 # On Cloud the filesystem is ephemeral — each cold-start gets a fresh container,
 # so the DB is always re-seeded. The version file ensures we also reseed when
 # schema changes land mid-session (e.g. after a redeploy with warm cache).
-_DB_SCHEMA_VERSION = "v8"
+_DB_SCHEMA_VERSION = "v9"
 
 @st.cache_resource(show_spinner="Initialising database…")
 def _ensure_db() -> None:
@@ -187,7 +187,9 @@ def _run_e2e_in_process(root=None) -> dict:
             m = MagicMock(); m.text = responses[idx[0] % len(responses)]; idx[0] += 1; return m
         c = MagicMock(); c.models.generate_content.side_effect = se; return c
 
-    for row in targets:
+    paid_count = 0  # track how many journeys we mark as paid this run
+
+    for row_idx, row in enumerate(targets):
         cid, name, pid, days = row["customer_id"], row["name"], row["policy_number"], row["days_left"]
         intensity = "urgent" if days <= 3 else ("intensive" if days <= 7 else "moderate")
         lapse     = 85 if days <= 5 else 55
@@ -260,6 +262,16 @@ def _run_e2e_in_process(root=None) -> dict:
             qs_agent.save_score(qs)
             summary["quality_scores"] += 1
 
+            # Mark every other journey (index 0, 2, …) as payment received
+            # so conversion_rate and premium_collected are always non-zero
+            if row_idx % 2 == 0:
+                try:
+                    from core.database import mark_payment_received
+                    mark_payment_received(journey.journey_id)
+                    paid_count += 1
+                except Exception as pe:
+                    summary["errors"].append(f"mark_payment {name}: {pe}")
+
         except Exception as e:
             summary["errors"].append(f"{name}: {e}")
             continue
@@ -272,6 +284,9 @@ def _run_e2e_in_process(root=None) -> dict:
         summary["feedback_events"] = fl_summary.total_events
     except Exception as e:
         summary["errors"].append(f"L4: {e}")
+
+    summary["payments_received"] = paid_count
+    return summary
 
 _ensure_db()
 

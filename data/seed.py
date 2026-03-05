@@ -12,7 +12,7 @@ Run:  python data/seed.py
 
 import sys
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 # ── Make sure project root is on PYTHONPATH ───────────────────────────────────
@@ -25,6 +25,8 @@ from core.models import (
 )
 from rich.console import Console
 from rich.table import Table
+
+import sqlite3
 
 console = Console()
 
@@ -777,6 +779,42 @@ def seed():
 
     console.print(table)
     console.print("\n[bold green]✅ Database seeded successfully![/bold green]\n")
+
+    # ── Seed pre-built journeys with payment_received=1 ───────────────────────
+    # These give the dashboard non-zero conversion_rate and premium_collected
+    # from the very first page load (before any E2E run is triggered).
+    DB_PATH = str(ROOT / "data" / "renewai.db")
+    SEED_JOURNEYS = [
+        # (customer_id, policy_number, premium, segment)
+        ("C003", "SLI-3302156",  18_500, "low_risk"),
+        ("C007", "SLI-7742560",  12_000, "medium_risk"),
+        ("C010", "SLI-1075893",  22_000, "low_risk"),
+        ("C012", "SLI-1297015",  16_800, "medium_risk"),
+        ("C015", "SLI-1520348",  11_200, "medium_risk"),
+        ("C020", "SLI-2075893", 200_000, "low_risk"),
+    ]
+    now_iso = datetime.now().isoformat()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        for cid, pid, _premium, seg in SEED_JOURNEYS:
+            conn.execute("""
+                INSERT OR IGNORE INTO renewal_journeys
+                    (journey_id, policy_number, customer_id, status, segment,
+                     lapse_score, channel_sequence, steps, current_step_index,
+                     payment_received, payment_received_at, escalated,
+                     created_at, updated_at)
+                VALUES (?,?,?,?,?, ?,?,?,?, ?,?,?, ?,?)
+            """, (
+                f"J-SEED-{uuid.uuid4().hex[:8]}", pid, cid, "payment_done", seg,
+                30, "[]", "[]", 0,
+                1, now_iso, 0,
+                now_iso, now_iso,
+            ))
+        conn.commit()
+        conn.close()
+        console.print(f"[green]✓ {len(SEED_JOURNEYS)} pre-paid journeys inserted (conversion / premium baseline)[/green]")
+    except Exception as e:
+        console.print(f"[yellow]⚠ Could not seed journeys: {e}[/yellow]")
 
 
 if __name__ == "__main__":

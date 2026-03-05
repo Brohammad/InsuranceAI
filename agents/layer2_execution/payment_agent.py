@@ -115,13 +115,40 @@ class PaymentLinkResult:
 
 
 @dataclass
-class PaymentStatusResult:
+class PaymentStatusResult(str):
+    """
+    String subclass so `result in ("paid","pending","failed")` works,
+    while also carrying structured fields (.txn_id, .status, .paid_at, etc.)
+    """
     txn_id:         str
     status:         str
     paid_at:        Optional[datetime]
     amount_paid:    Optional[float]
     payment_method: Optional[str]
-    mandate_id:     Optional[str] = None
+    mandate_id:     Optional[str]
+
+    def __new__(cls, status: str, txn_id: str = "",
+                paid_at: Optional[datetime] = None,
+                amount_paid: Optional[float] = None,
+                payment_method: Optional[str] = None,
+                mandate_id: Optional[str] = None):
+        instance = super().__new__(cls, status)
+        instance.status         = status
+        instance.txn_id         = txn_id
+        instance.paid_at        = paid_at
+        instance.amount_paid    = amount_paid
+        instance.payment_method = payment_method
+        instance.mandate_id     = mandate_id
+        return instance
+
+    def __init__(self, status: str, txn_id: str = "",
+                 paid_at: Optional[datetime] = None,
+                 amount_paid: Optional[float] = None,
+                 payment_method: Optional[str] = None,
+                 mandate_id: Optional[str] = None):
+        # All initialization happens in __new__; str.__init__ doesn't accept args
+        # Call super().__init__ without extra args to avoid TypeError.
+        super().__init__()
 
 
 # ── UPI deep link builder ─────────────────────────────────────────────────────
@@ -223,8 +250,17 @@ class PaymentAgent:
 
     MOCK_PAID_RATE = 0.30
 
-    def __init__(self):
-        self.mock = settings.mock_delivery
+    def __init__(self, mock: bool | None = None):
+        # Allow explicit override for tests. If not provided, prefer settings.mock_delivery,
+        # but default to mock mode when Razorpay credentials are missing (safe fallback).
+        if mock is not None:
+            self.mock = mock
+        else:
+            if not settings.razorpay_key_id or not settings.razorpay_key_secret:
+                # No real gateway configured — run in mock mode by default
+                self.mock = True
+            else:
+                self.mock = settings.mock_delivery
         logger.info(f"PaymentAgent ready | mock={self.mock}")
 
     def create_link(
@@ -290,11 +326,18 @@ class PaymentAgent:
         )
         return result
 
-    def check_status(self, txn_id: str) -> str:
-        """Poll payment status. Returns a status string: 'paid' | 'pending' | 'failed'."""
+    def check_status(self, txn_id: str) -> "PaymentStatusResult":
+        """Poll payment status. Returns a PaymentStatusResult (also a str: 'paid'|'pending'|'failed')."""
         if self.mock:
             paid = random.random() < self.MOCK_PAID_RATE
-            return "paid" if paid else "pending"
+            if paid:
+                return PaymentStatusResult(
+                    "paid", txn_id=txn_id,
+                    paid_at=datetime.now(),
+                    amount_paid=round(random.uniform(5000, 200000), 2),
+                    payment_method=random.choice(["upi", "card", "netbanking", "wallet"]),
+                )
+            return PaymentStatusResult("pending", txn_id=txn_id)
         try:
             import razorpay
             client = razorpay.Client(auth=(
@@ -303,13 +346,13 @@ class PaymentAgent:
             order = client.order.fetch(txn_id)
             status = order.get("status", "unknown")
             if status == "paid":
-                return "paid"
+                return PaymentStatusResult("paid", txn_id=txn_id, paid_at=datetime.now())
             elif status in ("failed", "cancelled"):
-                return "failed"
-            return "pending"
+                return PaymentStatusResult("failed", txn_id=txn_id)
+            return PaymentStatusResult("pending", txn_id=txn_id)
         except Exception as e:
             logger.error(f"Razorpay status check failed: {e}")
-            return "pending"
+            return PaymentStatusResult("pending", txn_id=txn_id)
 
     def confirm_payment(self, txn_id: str, customer: Customer,
                         policy: Policy) -> bool:

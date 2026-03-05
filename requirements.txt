@@ -49,6 +49,7 @@ python-dotenv>=1.0.0
 rich>=13.7.0
 loguru>=0.7.2
 jinja2>=3.1.4
+tomli>=2.0.0; python_version < "3.11"  # tomllib stdlib backport for Python 3.10
 
 # Testing
 pytest>=8.2.0

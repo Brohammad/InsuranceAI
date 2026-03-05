@@ -24,21 +24,58 @@ from google import genai
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
 
-# ── Streamlit Cloud: inject st.secrets into os.environ before Settings loads ──
+# ── Streamlit Cloud: inject secrets into os.environ before Settings loads ─────
 def _inject_streamlit_secrets() -> None:
     """
-    When running on Streamlit Community Cloud, secrets defined in the
-    App Settings → Secrets UI are available via st.secrets.
-    Inject them into os.environ so pydantic-settings picks them up.
-    This is a no-op locally (st.secrets will be empty or unavailable).
+    Injects Streamlit secrets into os.environ so pydantic-settings picks them up.
+
+    Strategy (tried in order):
+    1. Parse secrets.toml directly from disk — works at any import time, even
+       before the Streamlit runtime has fully initialised st.secrets.
+    2. Fall back to st.secrets API if the file isn't found (e.g. local dev with
+       secrets set via the Streamlit CLI).
+    Both are no-ops if no secrets are configured.
     """
+    # tomllib is stdlib in Python ≥3.11; fall back to tomli on 3.10
     try:
-        import streamlit as st  # noqa: PLC0415
-        for key, value in st.secrets.items():
-            if isinstance(value, str) and key not in os.environ:
-                os.environ[key] = value
-    except Exception:
-        pass  # Not running under Streamlit, or no secrets configured
+        import tomllib
+    except ImportError:
+        try:
+            import tomli as tomllib  # type: ignore[no-redef]
+        except ImportError:
+            tomllib = None  # type: ignore[assignment]
+
+    # Candidate paths for secrets.toml (Streamlit Cloud mounts at /mount/src/<repo>)
+    _candidates = [
+        ROOT_DIR / ".streamlit" / "secrets.toml",               # local dev
+        Path("/mount/src/insuranceai/.streamlit/secrets.toml"),  # Streamlit Cloud
+        Path.home() / ".streamlit" / "secrets.toml",            # ~/.streamlit fallback
+    ]
+
+    _loaded = False
+    if tomllib is not None:
+        for _p in _candidates:
+            if _p.exists():
+                try:
+                    with open(_p, "rb") as _f:
+                        _secrets = tomllib.load(_f)
+                    for _k, _v in _secrets.items():
+                        if isinstance(_v, str) and _k not in os.environ:
+                            os.environ[_k] = _v
+                    _loaded = True
+                    break
+                except Exception:
+                    pass
+
+    if not _loaded:
+        # Fallback: try st.secrets API (only works after Streamlit runtime init)
+        try:
+            import streamlit as st  # noqa: PLC0415
+            for _k, _v in st.secrets.items():
+                if isinstance(_v, str) and _k not in os.environ:
+                    os.environ[_k] = _v
+        except Exception:
+            pass
 
 
 _inject_streamlit_secrets()
@@ -54,7 +91,7 @@ class Settings(BaseSettings):
     )
 
     # ── Gemini API key ─────────────────────────────────────────────────────
-    gemini_api_key: str = Field(..., alias="GEMINI_API_KEY")
+    gemini_api_key: str = Field("", alias="GEMINI_API_KEY")
 
     # ── Model per agent role ───────────────────────────────────────────────
     model_orchestrator: str = Field("gemini-3.1-pro-preview", alias="GEMINI_MODEL_ORCHESTRATOR")

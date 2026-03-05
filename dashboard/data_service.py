@@ -25,6 +25,54 @@ def _conn() -> sqlite3.Connection:
     return conn
 
 
+def _ensure_optional_tables() -> None:
+    """
+    Create tables that are normally created by agents at runtime.
+    Called at import time so the dashboard never crashes with
+    'no such table' even before any agent has run.
+    """
+    with _conn() as conn:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS quality_scores (
+                score_id         TEXT PRIMARY KEY,
+                journey_id       TEXT,
+                policy_number    TEXT,
+                customer_name    TEXT,
+                channel          TEXT,
+                critique_score   REAL,
+                compliance_score REAL,
+                safety_score     REAL,
+                sentiment_score  REAL,
+                total_score      REAL,
+                grade            TEXT,
+                summary          TEXT,
+                strengths        TEXT,
+                improvements     TEXT,
+                scored_at        TEXT
+            );
+            CREATE TABLE IF NOT EXISTS ab_test_results (
+                test_id          TEXT PRIMARY KEY,
+                variant_type     TEXT,
+                winner           TEXT,
+                runner_up        TEXT,
+                winner_conv_rate REAL,
+                runner_up_rate   REAL,
+                lift_pct         REAL,
+                significant      INTEGER,
+                sample_size      INTEGER,
+                recommendation   TEXT,
+                run_at           TEXT
+            );
+        """)
+
+
+# Ensure optional tables exist as soon as this module is imported
+try:
+    _ensure_optional_tables()
+except Exception:
+    pass  # DB may not exist yet — _ensure_db() in app.py handles that
+
+
 # ── Overview KPIs ─────────────────────────────────────────────────────────────
 
 def get_overview_kpis() -> dict[str, Any]:
@@ -261,7 +309,7 @@ def get_escalation_resolution_rate() -> dict[str, int]:
 
 def get_ab_results() -> pd.DataFrame:
     with _conn() as conn:
-        rows = conn.execute("SELECT * FROM ab_test_results ORDER BY created_at DESC").fetchall()
+        rows = conn.execute("SELECT * FROM ab_test_results ORDER BY run_at DESC").fetchall()
     return pd.DataFrame([dict(r) for r in rows])
 
 

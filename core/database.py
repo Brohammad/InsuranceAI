@@ -157,6 +157,38 @@ CREATE INDEX IF NOT EXISTS idx_journeys_policy       ON renewal_journeys(policy_
 CREATE INDEX IF NOT EXISTS idx_journeys_status       ON renewal_journeys(status);
 CREATE INDEX IF NOT EXISTS idx_interactions_journey  ON interactions(journey_id);
 CREATE INDEX IF NOT EXISTS idx_escalations_priority  ON escalation_cases(priority);
+
+CREATE TABLE IF NOT EXISTS quality_scores (
+    score_id         TEXT PRIMARY KEY,
+    journey_id       TEXT,
+    policy_number    TEXT,
+    customer_name    TEXT,
+    channel          TEXT,
+    critique_score   REAL,
+    compliance_score REAL,
+    safety_score     REAL,
+    sentiment_score  REAL,
+    total_score      REAL,
+    grade            TEXT,
+    summary          TEXT,
+    strengths        TEXT,
+    improvements     TEXT,
+    scored_at        TEXT
+);
+
+CREATE TABLE IF NOT EXISTS ab_test_results (
+    test_id          TEXT PRIMARY KEY,
+    variant_type     TEXT,
+    winner           TEXT,
+    runner_up        TEXT,
+    winner_conv_rate REAL,
+    runner_up_rate   REAL,
+    lift_pct         REAL,
+    significant      INTEGER,
+    sample_size      INTEGER,
+    recommendation   TEXT,
+    run_at           TEXT
+);
 """
 
 

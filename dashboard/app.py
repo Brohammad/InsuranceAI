@@ -98,27 +98,44 @@ div[data-testid="metric-container"] [data-testid="stMetricValue"] {
 """, unsafe_allow_html=True)
 
 
-# ── Auto-seed DB if missing (needed on Streamlit Community Cloud) ─────────────
+# ── Auto-seed DB (Streamlit Community Cloud) ──────────────────────────────────
+# Bump this version string whenever the DB schema changes.
+# On Cloud the filesystem is ephemeral — each cold-start gets a fresh container,
+# so the DB is always re-seeded. The version file ensures we also reseed when
+# schema changes land mid-session (e.g. after a redeploy with warm cache).
+_DB_SCHEMA_VERSION = "v7"
+
 @st.cache_resource(show_spinner="Initialising database…")
 def _ensure_db() -> None:
-    """Create and seed the SQLite DB if it doesn't exist yet."""
+    """
+    Seed (or re-seed) the SQLite DB so it always matches the current schema.
+    Safe to call multiple times — idempotent within a single process lifetime.
+    """
     import sys as _sys
+    import importlib.util as _ilu
     from pathlib import Path as _Path
-    _db = _Path(__file__).resolve().parent.parent / "data" / "renewai.db"
-    if not _db.exists():
+
+    _root = _Path(__file__).resolve().parent.parent
+    _db   = _root / "data" / "renewai.db"
+    _ver  = _root / "data" / ".schema_version"
+
+    # Wipe DB if schema version has changed (or it doesn't exist)
+    _stale = (not _db.exists()) or (not _ver.exists()) or (_ver.read_text().strip() != _DB_SCHEMA_VERSION)
+    if _stale:
+        if _db.exists():
+            _db.unlink()          # delete stale DB
         _db.parent.mkdir(parents=True, exist_ok=True)
-        # Import seed module and call seed() directly
-        _root = str(_Path(__file__).resolve().parent.parent)
-        if _root not in _sys.path:
-            _sys.path.insert(0, _root)
-        import importlib.util as _ilu
-        _spec = _ilu.spec_from_file_location(
-            "seed",
-            _Path(__file__).resolve().parent.parent / "data" / "seed.py",
-        )
-        _mod = _ilu.module_from_spec(_spec)
+
+        # Run seed
+        if str(_root) not in _sys.path:
+            _sys.path.insert(0, str(_root))
+        _spec = _ilu.spec_from_file_location("seed", _root / "data" / "seed.py")
+        _mod  = _ilu.module_from_spec(_spec)
         _spec.loader.exec_module(_mod)
-        _mod.seed()  # explicitly call seed()
+        _mod.seed()
+
+        # Write version sentinel
+        _ver.write_text(_DB_SCHEMA_VERSION)
 
 
 _ensure_db()

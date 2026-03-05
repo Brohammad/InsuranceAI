@@ -24,6 +24,7 @@ build/
 
 # DB (runtime artefact)
 data/renewai.db
+data/.schema_version
 
 # generated reports (large, auto-generated)
 outputs/reports/

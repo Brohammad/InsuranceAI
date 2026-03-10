@@ -855,6 +855,140 @@ streamlit run dashboard/app.py
 
 ---
 
+## 🖥️ E2E Run — Live Terminal Output
+
+> Real output from `python run_e2e.py` — all 5 layers, 3 customers, fresh DB seed.
+
+```
+╭─────────────────────────────────────────────────────────────╮
+│ 🛡️  RenewAI — Full End-to-End Run                           │
+│ Mock mode • All 5 layers • DB updates verified in real-time │
+╰─────────────────────────────────────────────────────────────╯
+
+  Table              Rows
+ ━━━━━━━━━━━━━━━━━━━━━━━━━
+  renewal_journeys      6   ← 6 pre-paid baseline journeys
+  interactions          0
+  quality_scores        0
+  ab_test_results       0
+
+──────── ▶ Customer 1/3: Fatima Khan  (due in 2 days) ──────────
+
+⚙  Layer 1 — Segmentation → Propensity → Timing → Channel
+  Segmented SLI-1419237 | Fatima Khan → [high_risk] | risk=high
+  Propensity scored     | Fatima Khan → score=85 | intensity=urgent
+  Timing                | Fatima Khan → 18:00-20:00 on [Mon, Wed] | urgency=True
+  Channel               | Fatima Khan → ['whatsapp', 'email', 'voice']
+  ✅ Journey created: JRN-F1037D93  │  Segment: high_risk  │  Steps: 3
+
+📤  Layer 2 — Dispatching messages
+  WA  sent  WA-69E3E4D668  → Fatima Khan | outcome=read
+  Email     EMAIL-C83DA1CA → Fatima Khan | outcome=no_response
+  Voice     CALL-4D03B912  → Fatima Khan | outcome=responded | intent=interested | 141s
+  Payment   TXN-3C869ED7   → Rs.11,000   | qr=1123B | autopay=yes | banks=8
+
+🔍  Layer 3 — Quality Gate
+  ✅ Quality score: 88.6  Grade: B
+  ✅ Score 88.6 ≥ 70 → routing to L4 learning
+
+──────── ▶ Customer 2/3: Mohammed Iqbal  (due in 4 days) ───────
+
+⚙  Layer 1  →  Journey JRN-846C2D4D  │  high_risk  │  score=85  │  Steps: 3
+📤  Layer 2  →  WA: payment_made  ← journey stopped (payment received)
+🔍  Layer 3  →  Score 88.6 ≥ 70 → L4
+
+──────── ▶ Customer 3/3: Rekha Nambiar  (due in 5 days) ────────
+
+⚙  Layer 1  →  Journey JRN-38DBF154  │  high_risk  │  score=85  │  Steps: 3
+📤  Layer 2  →  WA: read | Email: delivered | Voice: payment_made ← journey stopped
+🔍  Layer 3  →  Score 88.6 ≥ 70 → L4
+
+─────── 🔄 Layer 4 — Feedback → A/B Test → Drift → Report ──────
+  Journeys routed to L4 : 3 (score ≥ 70)
+  Events processed      : 7  │  Positive: 6  │  Negative: 1
+  A/B  channel          →  winner=voice  conv=50.0%  lift=+50.2%
+  Drift                 →  ⚠  WARNING — 2 anomalies detected
+  Report                →  outputs/reports/report_daily_20260310_052518.md ✅
+  ↺ Insights loop       →  Orchestrator: best_channel=voice | 2 drift alerts
+
+── 🚨 Layer 5 — Human Escalation Queue + Supervisor Dashboard ───
+  Journeys routed to L5 : 0  (all scores ≥ 70 this run)
+  Renewal Rate: 88.9%   │  Premium Recovered: Rs.581,700
+  Avg Quality Score: 88.6/100  │  IRDAI Compliance: 100.0%
+  Escalation Queue: ✓ empty — no open escalations
+
+╭───────────────────────────────────────────────────────────────╮
+│ ✅ End-to-End Run Complete!                                   │
+│ • 3 journeys created & dispatched                             │
+│ • 3 quality scores written  (renewal_journeys: 9, interactions: 7)  │
+│ • DB updated in real-time                                     │
+╰───────────────────────────────────────────────────────────────╯
+```
+
+---
+
+## 🏛️ Design Decisions
+
+> Why these specific technologies and patterns — and what the alternatives were.
+
+### LangGraph for Layer 1 orchestration (not plain Python)
+
+| Option | Why rejected |
+|--------|-------------|
+| Plain sequential function calls | No state schema — agent outputs are dict-scattered, hard to test individual nodes |
+| LangChain AgentExecutor | Tool-calling loop model doesn't fit a deterministic pipeline with fixed node order |
+| **LangGraph StateGraph** ✅ | Typed `JourneyState` TypedDict enforces what each node reads and writes; nodes are independently unit-testable; graph is inspectable; easy to add conditional edges later (e.g. skip voice for DND customers) |
+
+The key constraint: Layer 1 must *plan first, execute later* — the entire journey (channels, timing, steps) is assembled before a single message is sent. LangGraph's compile-then-invoke model maps directly onto that.
+
+### SQLite (not PostgreSQL / DynamoDB)
+
+| Concern | Answer |
+|---------|--------|
+| "Won't SQLite break under load?" | This is a **single-tenant renewal engine** (one insurer, one portfolio). At 500 journeys/day, SQLite handles this comfortably; it's used in production by many apps at this scale. |
+| "Concurrent writes?" | All writes are from a single Python process in this architecture; WAL mode handles the rare concurrent dashboard read. |
+| "Migration path?" | `core/database.py` is the only file that knows about SQLite — swap the connection string and you're on Postgres with zero agent changes. |
+
+SQLite also means **zero infrastructure to set up** for a new developer — `python data/seed.py` and you're running. That was a deliberate "day-zero" design choice.
+
+### ChromaDB (not pgvector / Pinecone)
+
+| Option | Trade-off |
+|--------|-----------|
+| pgvector | Requires Postgres — contradicts the zero-infra goal above |
+| Pinecone / Weaviate | Network call + API key + cost for a 170-doc corpus — overkill |
+| **ChromaDB local** ✅ | Persists to `knowledge/chroma_db/` on disk; zero network; works offline; the keyword fallback means tests pass even without `sentence-transformers` installed |
+
+At 170 documents, semantic search quality from a local ChromaDB is indistinguishable from a cloud vector DB. The switch to Pinecone would be a one-line change in `RagKnowledgeBase.__init__`.
+
+### Mock-first architecture (not live-API-only)
+
+Every agent has a `mock_delivery=True` path that returns realistic, deterministic output without calling any external API. This was a deliberate design choice:
+
+```
+  BENEFITS
+  ─────────────────────────────────────────────────────────────
+  1. 206 tests run in 8s with no API keys needed
+  2. CI/CD works without secrets in the pipeline
+  3. Developers can build new agents offline
+  4. Outcome distributions in mock mode are tuned to be realistic
+     (payment_made / read / no_response / objection in real ratios)
+  5. Switching to live mode is a single env-var: MOCK_DELIVERY=false
+```
+
+The mock layer is not a test stub — it's a first-class code path that the full E2E `run_e2e.py` uses by default. Real API calls are opt-in via `.env`.
+
+### Prompts as a separate package (not inline strings)
+
+Inline prompt strings scattered across 14 agent files meant:
+- A/B testing a prompt required finding it in a 200-line agent file
+- Prompt changes weren't diff-reviewable in isolation
+- No way to version or audit what prompt produced which output
+
+The `prompts/` package makes every prompt a named constant, importable, and diff-able. A prompt change shows as a clean one-file diff in `git log --stat`.
+
+---
+
 ## 🧪 Test Summary
 
 ```
@@ -889,6 +1023,8 @@ TOTAL                                   206 passed  ~8s
 | `6416b23` | WORKFLOW.md — beginner-friendly guide with glossary |
 | `f31d558` | Prompt Registry (★) — all 15 LLM prompts to `prompts/` package |
 | `0f78ee9` | Plan & Execute (★) + Critique Agent (★) — workflow.xml compliance, L3→L4/L5 routing, full L4 sub-pipeline |
+| `543068b` | docs: prominently highlight RAG, Plan & Execute, Model Tracing, Critique Agent in README |
+| `3d0a004` | docs: add `.env.example`, fix duplicate separator, E2E snapshot, Design Decisions section |
 
 > (★) = RAG · Plan & Execute · Model Tracing · Critique Agent — the four highlighted patterns
 

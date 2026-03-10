@@ -120,26 +120,9 @@ class VoiceResult:
     mock:           bool = True
 
 
-# ── Prompt ────────────────────────────────────────────────────────────────────
+# ── Import prompt ─────────────────────────────────────────────────────────────
 
-VOICE_PROMPT = """
-You are a voice call script writer at Suraksha Life Insurance.
-
-{language_instruction}
-
-Write a natural outbound renewal call script in {language}.
-The script should sound like a real person speaking — no formal stiffness.
-Include:
-  1. Greeting + identity (use native-language greeting)
-  2. Purpose (renewal due in {due_days} days, ₹{premium:,} premium)
-  3. Offer to send WhatsApp payment link
-  4. Graceful close
-
-{agent_context}
-
-Keep it under 90 seconds of speech (~200 words).
-Write ONLY the agent's lines, no stage directions.
-"""
+from prompts.layer2 import VOICE_PROMPT
 
 
 # ── ElevenLabs voice map ──────────────────────────────────────────────────────

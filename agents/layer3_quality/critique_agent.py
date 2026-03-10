@@ -24,44 +24,8 @@ from google import genai
 
 from core.config import settings
 from core.models import CritiqueResult, Customer, Policy
+from prompts.layer3 import CRITIQUE_PROMPT
 
-
-# ── Prompt ────────────────────────────────────────────────────────────────────
-
-CRITIQUE_PROMPT = """\
-You are a senior communication quality reviewer for Suraksha Life Insurance.
-Review the following outbound renewal message and return a structured critique.
-
-CUSTOMER PROFILE:
-  Name:     {name}
-  Segment:  {segment}
-  Language: {language}
-  Age:      {age}
-  Occupation: {occupation}
-
-POLICY:
-  Number:         {policy_number}
-  Annual Premium: ₹{premium:,}
-  Days to Lapse:  {days_to_lapse}
-  Lapse Score:    {lapse_score}/100
-
-MESSAGE (channel={channel}):
-{message}
-
-Return a JSON object with these fields:
-{{
-  "approved": true/false,
-  "tone_score": 1-10,
-  "accuracy_score": 1-10,
-  "personalisation_score": 1-10,
-  "conversion_likelihood": 1-10,
-  "issues": ["list of specific issues found"],
-  "rewrite": "improved version if approved=false, else null",
-  "overall_verdict": "one sentence summary"
-}}
-
-Be strict. Reject any message that is pushy, factually wrong, or feels generic.
-"""
 
 # ── Mock helpers ───────────────────────────────────────────────────────────────
 

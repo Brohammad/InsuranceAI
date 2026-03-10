@@ -171,25 +171,9 @@ def _mock_sentiment(customer: Customer, policy: Policy) -> SentimentResult:
     )
 
 
-# ── Prompt ────────────────────────────────────────────────────────────────────
+# ── Import prompt ─────────────────────────────────────────────────────────────
 
-SENTIMENT_PROMPT = """\
-Analyse this customer message in the context of an insurance renewal reminder.
-
-CUSTOMER: {name} | Language: {language} | Segment: {segment}
-MESSAGE: "{message}"
-
-Return JSON:
-{{
-  "polarity": "positive|neutral|negative|hostile",
-  "score": -1.0 to 1.0,
-  "intent": "intending_to_pay|needs_time|objecting|ignoring|escalating|already_paid|interested",
-  "detected_language": "hindi|english|tamil|telugu|kannada|malayalam|bengali|marathi|gujarati",
-  "key_topics": ["list", "of", "topics"],
-  "confidence": 0.0-1.0,
-  "summary": "one sentence action recommendation for the agent"
-}}
-"""
+from prompts.layer3 import SENTIMENT_PROMPT
 
 
 # ── Agent ─────────────────────────────────────────────────────────────────────

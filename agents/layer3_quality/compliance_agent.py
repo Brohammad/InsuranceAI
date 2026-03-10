@@ -192,26 +192,9 @@ def _mock_compliance(customer: Customer, policy: Policy, message: str) -> Compli
     )
 
 
-# ── Prompt ────────────────────────────────────────────────────────────────────
+# ── Import prompt ─────────────────────────────────────────────────────────────
 
-COMPLIANCE_PROMPT = """\
-You are an IRDAI compliance checker for Suraksha Life Insurance.
-
-Review the following message against IRDAI communication guidelines and check:
-R03: Are lapse consequences clearly stated?
-R04: Is there false urgency or scare tactics?
-R08: Is the premium amount ₹{premium:,} mentioned accurately?
-
-MESSAGE:
-{message}
-
-Return JSON:
-{{
-  "R03": {{"passed": true/false, "note": ""}},
-  "R04": {{"passed": true/false, "note": ""}},
-  "R08": {{"passed": true/false, "note": ""}}
-}}
-"""
+from prompts.layer3 import COMPLIANCE_PROMPT
 
 
 # ── Agent ─────────────────────────────────────────────────────────────────────

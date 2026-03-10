@@ -318,25 +318,9 @@ def _template_report(stats: dict) -> str:
 """
 
 
-# ── LLM-enriched report (real mode) ──────────────────────────────────────────
+# ── Import prompt ─────────────────────────────────────────────────────────────
 
-ENRICH_PROMPT = """\
-You are the AI analytics engine for Suraksha Life Insurance's RenewAI system.
-Based on the following renewal operations data, write a concise Executive Summary
-(3-4 bullet points) and 5 specific actionable Recommendations for the operations team.
-
-DATA:
-{stats_json}
-
-Focus on:
-- Renewal rate improvement opportunities
-- Segment-specific insights
-- Quality and compliance gaps
-- Safety escalation patterns
-- A/B test learnings
-
-Return plain text — bullets only, no markdown headers.
-"""
+from prompts.layer4 import ENRICH_PROMPT
 
 
 # ── Main agent ────────────────────────────────────────────────────────────────

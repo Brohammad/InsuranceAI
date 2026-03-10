@@ -26,6 +26,7 @@ from loguru import logger
 
 from core.config import settings, get_gemini_client
 from core.models import Customer, Policy, CustomerSegment
+from prompts.layer1 import PROPENSITY_PROMPT
 
 
 # ── Feedback-derived few-shot cache ───────────────────────────────────────────
@@ -43,68 +44,6 @@ class PropensityResult:
     top_reasons: list[str] = field(default_factory=list)
     recommended_actions: list[str] = field(default_factory=list)
     reasoning: str = ""
-
-
-# ── Prompt template ───────────────────────────────────────────────────────────
-
-PROPENSITY_PROMPT = """
-You are a lapse-prediction specialist at Suraksha Life Insurance.
-
-Given the customer and policy data below, output a JSON object estimating
-the probability that this customer will NOT renew (i.e., let the policy lapse).
-
-SCORING GUIDE:
-- 0–20  : Very likely to renew (auto-debit, great payment history, engaged)
-- 21–40 : Probably will renew but worth a gentle nudge
-- 41–60 : 50/50 — needs moderate outreach
-- 61–80 : At risk — missed payments, high premium burden, low engagement
-- 81–100 : High risk of lapse — multiple misses, very close to due date, distress signals
-
-INTERVENTION INTENSITY:
-- none      : score 0–15, just send reminder
-- light     : score 16–30, 1–2 personalised touches
-- moderate  : score 31–55, multi-channel 5-day campaign
-- intensive : score 56–80, daily outreach, advisor call
-- urgent    : score 81–100, same-day escalation to human advisor
-
-CUSTOMER DATA:
-Name:               {name}
-Age:                {age}
-Occupation:         {occupation}
-Preferred Language: {language}
-Preferred Channel:  {channel}
-On DND:             {dnd}
-
-POLICY DATA:
-Policy Number:      {policy_number}
-Product Type:       {product_type}
-Annual Premium:     ₹{premium:,}
-Sum Assured:        ₹{sum_assured:,}
-Tenure:             {tenure} years  ({years_completed} completed)
-Renewal Due In:     {days_to_due} days
-Has Auto-Debit:     {auto_debit}
-Payment History:    {payment_history}
-  → Missed:  {missed_count}  |  Late: {late_count}  |  On-Time: {ontime_count}
-
-SEGMENT (from Segmentation Agent): {segment}
-
-RULES:
-1. auto-debit + all on_time  → score ≤ 20
-2. 2+ missed + due ≤ 7 days  → score ≥ 80
-3. all missed                → score ≥ 75
-4. premium ≥ ₹75,000 + good history → score ≤ 30
-5. single missed, rest on_time → score 35–55
-6. mostly late, no auto-debit → score 50–65
-
-Respond with ONLY a JSON object — no markdown, no explanation:
-{{
-  "lapse_score": <integer 0-100>,
-  "intervention_intensity": "<none|light|moderate|intensive|urgent>",
-  "top_reasons": ["<reason1>", "<reason2>", "<reason3>"],
-  "recommended_actions": ["<action1>", "<action2>"],
-  "reasoning": "<2-3 sentence rationale>"
-}}
-"""
 
 
 # ── Agent class ────────────────────────────────────────────────────────────────

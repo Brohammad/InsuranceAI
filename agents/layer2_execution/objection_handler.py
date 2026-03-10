@@ -176,30 +176,9 @@ class ObjectionResult:
     follow_up_required: bool = False
 
 
-# ── Prompt ────────────────────────────────────────────────────────────────────
+# ── Import prompt ─────────────────────────────────────────────────────────────
 
-OBJECTION_PROMPT = """
-You are an objection handling specialist at Suraksha Life Insurance.
-
-CUSTOMER MESSAGE: "{message}"
-
-POLICY CONTEXT:
-  Customer: {name}
-  Policy:   {policy_number} ({product_type})
-  Premium:  ₹{premium:,}
-  Sum Assured: ₹{sum_assured:,}
-  Language: {language}
-
-Classify the objection into ONE of:
-no_money | want_cancel | bad_returns | mis_selling | bereavement |
-do_it_later | better_policy | dont_need | too_expensive | complaint |
-want_human | generic
-
-Then write a 2-3 sentence empathetic counter-response in {language}.
-
-Respond with ONLY a JSON object:
-{{"objection_type": "<type>", "counter_response": "<text>"}}
-"""
+from prompts.layer2 import OBJECTION_PROMPT
 
 
 # ── Agent ─────────────────────────────────────────────────────────────────────

@@ -191,29 +191,9 @@ def _mock_safety(customer: Customer, policy: Policy, journey_id: str) -> SafetyR
     )
 
 
-# ── Prompt ────────────────────────────────────────────────────────────────────
+# ── Import prompt ─────────────────────────────────────────────────────────────
 
-SAFETY_PROMPT = """\
-You are a real-time safety monitor for Suraksha Life Insurance customer communications.
-
-Analyse the following customer message for safety signals:
-
-CUSTOMER: {name} | Age: {age} | Language: {language}
-MESSAGE: {message}
-
-Classify with ONE of these flags:
-  clear | financial_stress | emotional_distress | crisis | mis_selling | vulnerable | bereavement
-
-Return JSON:
-{{
-  "flag": "<flag>",
-  "confidence": 0.0-1.0,
-  "trigger_phrases": ["phrases that triggered this classification"],
-  "agent_note": "brief explanation for human agent"
-}}
-
-Escalate to human if flag is crisis, mis_selling, or emotional_distress.
-"""
+from prompts.layer3 import SAFETY_PROMPT
 
 
 # ── Agent ─────────────────────────────────────────────────────────────────────

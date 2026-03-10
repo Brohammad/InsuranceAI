@@ -36,6 +36,7 @@ from loguru import logger
 
 from core.config import settings, get_gemini_client
 from core.models import Channel, Customer, Policy
+from prompts.layer1 import CHANNEL_PROMPT
 
 
 # ── Output model ──────────────────────────────────────────────────────────────
@@ -46,65 +47,6 @@ class ChannelResult:
     channel_sequence : list[Channel] = field(default_factory=list)
     rationale        : str           = ""
     dnd_restricted   : bool          = False
-
-
-# ── Prompt template ───────────────────────────────────────────────────────────
-
-CHANNEL_PROMPT = """
-You are a multi-channel outreach specialist at Suraksha Life Insurance.
-
-Choose the BEST ordered channel sequence for this customer's renewal campaign.
-Valid channels: whatsapp, sms, email, voice, ivr
-
-HARD RULES:
-1. If is_on_dnd=true → use ONLY sms (TRAI DND regulations, promotional SMS allowed with consent)
-2. Maximum 4 channels in the sequence
-3. Voice calls MUST be between 09:00–21:00 IST (already handled by Timing Agent)
-4. Do not repeat the same channel twice
-
-CHANNEL SELECTION GUIDELINES:
-- whatsapp : best for age < 55, digital-savvy, existing pref; great for media/links
-- sms      : universal fallback; short reminders; always works
-- email    : good for HNI, professionals, detailed policy docs; age < 65
-- voice    : best for distress, elderly, low digital literacy, urgent escalations
-- ivr      : automated nudge; good for price-sensitive to pay via IVR menu
-
-SEGMENT RULES:
-- auto_renewer      : [whatsapp, sms] — just a friendly reminder, no hard push
-- wealth_builder    : [email, whatsapp, voice] — professional, data-rich communications
-- nudge_needed      : [whatsapp, sms, voice] — gentle sequence escalating to call
-- price_sensitive   : [whatsapp, ivr, voice] — payment link via whatsapp, IVR payment option
-- high_risk         : [voice, whatsapp, sms] — start with advisor call
-- distress          : [voice, whatsapp, sms] — empathetic advisor call first
-
-URGENCY:
-- If urgency_override=true (due ≤ 5 days): always put voice as first channel
-
-CUSTOMER DATA:
-Name:             {name}
-Age:              {age}
-Occupation:       {occupation}
-Preferred Channel:{preferred_channel}
-Preferred Lang:   {language}
-On DND:           {dnd}
-Has WhatsApp:     {has_whatsapp}
-
-POLICY DATA:
-Product Type:     {product_type}
-Annual Premium:   ₹{premium:,}
-Renewal Due In:   {days_to_due} days
-Urgency Override: {urgency_override}
-Segment:          {segment}
-Lapse Score:      {lapse_score}
-
-Respond with ONLY a JSON object — no markdown, no explanation:
-{{
-  "primary_channel": "<channel>",
-  "channel_sequence": ["<ch1>", "<ch2>", "<ch3>"],
-  "rationale": "<1-2 sentence explanation>",
-  "dnd_restricted": <true|false>
-}}
-"""
 
 
 # ── Agent class ────────────────────────────────────────────────────────────────

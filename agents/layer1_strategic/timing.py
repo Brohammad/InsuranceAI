@@ -33,6 +33,7 @@ from loguru import logger
 
 from core.config import settings, get_gemini_client
 from core.models import Customer, Policy
+from prompts.layer1 import TIMING_PROMPT
 
 
 # ── Output model ──────────────────────────────────────────────────────────────
@@ -69,65 +70,12 @@ def _next_salary_days() -> list[str]:
                 d = date(today.year + 1, 1, target_day)
             else:
                 d = date(today.year, today.month + 1, target_day)
-        results.append(d.strftime("%A %d %b"))
+                results.append(d.strftime("%A %d %b"))
     return results
 
 
-# ── Prompt template ───────────────────────────────────────────────────────────
-
-TIMING_PROMPT = """
-You are a communication-timing specialist at Suraksha Life Insurance.
-
-Given the customer profile below, recommend the OPTIMAL contact windows
-for an insurance renewal follow-up campaign.
-
-HARD RULES:
-1. TRAI regulations: calls/WhatsApp only 9:00 AM – 9:00 PM IST
-2. Do NOT schedule on national holidays
-3. If urgency_override is true (due ≤ 5 days), recommend contacting on the
-   very NEXT business day morning (9:00–11:00)
-4. Salary day bonus: if the 1st or 7th of the month falls within 7 days,
-   flag salary_day_flag=true and prefer that day (customers have cash)
-
-CUSTOMER PROFILE:
-Name:                 {name}
-Age:                  {age}
-Occupation:           {occupation}
-Preferred Language:   {language}
-Preferred Call Time:  {preferred_call_time}
-Preferred Channel:    {channel}
-On DND:               {dnd}
-
-POLICY CONTEXT:
-Product Type:         {product_type}
-Annual Premium:       ₹{premium:,}
-Renewal Due In:       {days_to_due} days
-Urgency Override:     {urgency_override}
-Intervention Level:   {intensity}
-Upcoming Salary Days: {salary_days}
-
-OCCUPATION HEURISTICS:
-- farmer / agricultural → contact 6–8 PM (after field work)
-- daily_wage / labour   → contact 8–9 AM or 7–8 PM
-- office / corporate    → contact 12–1 PM (lunch) or 6–8 PM
-- homemaker             → contact 10 AM–12 PM or 3–5 PM
-- self_employed / business → contact 10 AM–12 PM or 7–8 PM
-- retired               → contact 9–11 AM or 4–6 PM
-- student               → contact 5–8 PM
-
-Respond with ONLY a JSON object — no markdown, no explanation:
-{{
-  "best_contact_window": "<HH:MM–HH:MM>",
-  "best_days": ["<day1>", "<day2>"],
-  "avoid_days": ["<day>"],
-  "salary_day_flag": <true|false>,
-  "urgency_override": <true|false>,
-  "rationale": "<1-2 sentence explanation>"
-}}
-"""
-
-
 # ── Agent class ────────────────────────────────────────────────────────────────
+
 
 class TimingAgent:
     """Recommends optimal contact windows per customer."""

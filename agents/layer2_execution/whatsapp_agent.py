@@ -32,6 +32,7 @@ from agents.layer2_execution.mock_utils import (
 from agents.layer2_execution.language_utils import (
     build_language_instruction, get_mock_message, build_agent_context,
 )
+from prompts.layer2 import WA_PROMPT
 
 
 # ── Output ────────────────────────────────────────────────────────────────────
@@ -44,32 +45,6 @@ class WhatsAppResult:
     sentiment:    float
     delivered_at: datetime
     mock:         bool = True
-
-
-# ── Prompt ────────────────────────────────────────────────────────────────────
-
-WA_PROMPT = """
-You are a WhatsApp communication specialist at Suraksha Life Insurance.
-
-{language_instruction}
-
-Write a personalised WhatsApp renewal message in {language}.
-Keep it concise (max 5 lines), warm, and include a clear call-to-action.
-Do NOT include markdown or HTML — plain text with emojis only.
-Replace [PAYMENT_LINK] literally — the system will substitute the real link.
-
-CUSTOMER: {name}
-POLICY:   {policy_number} ({product_type})
-PREMIUM:  ₹{premium:,}
-DUE IN:   {due_days} days
-TONE:     {tone}
-STRATEGY: {strategy}
-LANGUAGE: {language}
-
-{agent_context}
-
-Write ONLY the message text, nothing else.
-"""
 
 
 # ── Agent ─────────────────────────────────────────────────────────────────────

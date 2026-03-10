@@ -27,61 +27,7 @@ from core.models import (
     ProductType,
     SegmentationResult,
 )
-
-
-# ── Prompt template ───────────────────────────────────────────────────────────
-
-SEGMENTATION_PROMPT = """
-You are a customer segmentation expert for Suraksha Life Insurance.
-
-Analyse the customer and policy data below and classify the customer into
-exactly ONE of these segments:
-
-SEGMENTS:
-- auto_renewer     : Has auto-debit, always pays on time, minimal intervention needed
-- wealth_builder   : HNI / high-value policy (premium > ₹75,000), financially comfortable
-- nudge_needed     : Has paid before but sometimes late, forgets rather than refuses
-- price_sensitive  : Premium feels high, has been late/missed, may think of surrendering
-- high_risk        : Multiple missed payments, low engagement, likely to lapse
-- distress         : Financial hardship signals, bereavement, health crisis, job loss
-
-CUSTOMER DATA:
-Name:               {name}
-Age:                {age}
-Occupation:         {occupation}
-City / State:       {city}, {state}
-Preferred Channel:  {preferred_channel}
-Preferred Language: {preferred_language}
-Preferred Time:     {preferred_call_time}
-
-POLICY DATA:
-Policy Number:      {policy_number}
-Product Type:       {product_type}
-Product Name:       {product_name}
-Annual Premium:     ₹{annual_premium:,.0f}
-Sum Assured:        ₹{sum_assured:,.0f}
-Years Completed:    {years_completed} of {tenure_years}
-Due In:             {days_until_due} days
-Payment History:    {payment_history}
-Has Auto-Debit:     {has_auto_debit}
-
-RULES:
-- If has_auto_debit=True AND all payments on_time → always auto_renewer
-- If annual_premium >= 75000 AND payment history mostly on_time → wealth_builder
-- If 2+ missed payments in history → high_risk
-- If all payments missed AND occupation suggests financial stress → distress
-- If payments are mix of on_time and late → nudge_needed or price_sensitive
-  (price_sensitive if premium > ₹20,000 relative to occupation)
-
-Respond with ONLY valid JSON (no markdown, no explanation):
-{{
-  "segment": "<one of the six segment keys>",
-  "recommended_tone": "<friendly|formal|urgent|empathetic|concierge>",
-  "recommended_strategy": "<e.g. tax_benefit_reminder|fund_performance|family_protection|emi_offer|premium_holiday|personal_call>",
-  "risk_flag": "<low|medium|high>",
-  "reasoning": "<one sentence explaining the classification>"
-}}
-"""
+from prompts.layer1 import SEGMENTATION_PROMPT
 
 
 # ── Agent class ───────────────────────────────────────────────────────────────

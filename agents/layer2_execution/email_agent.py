@@ -28,6 +28,7 @@ from agents.layer2_execution.mock_utils import (
 from agents.layer2_execution.language_utils import (
     build_language_instruction, get_mock_message, build_agent_context,
 )
+from prompts.layer2 import EMAIL_PROMPT
 
 
 # ── Output ────────────────────────────────────────────────────────────────────
@@ -41,31 +42,6 @@ class EmailResult:
     sentiment:  float
     sent_at:    datetime
     mock:       bool = True
-
-
-# ── Prompt ────────────────────────────────────────────────────────────────────
-
-EMAIL_PROMPT = """
-You are an expert insurance renewal email writer at Suraksha Life Insurance.
-
-{language_instruction}
-
-Write a professional renewal reminder email in {language}. 
-Include subject line prefixed with "SUBJECT:" then the body.
-Use HTML formatting. Keep the email under 300 words.
-Replace [PAYMENT_LINK] and [UNSUBSCRIBE] literally.
-
-CUSTOMER: {name}
-POLICY:   {policy_number} — {product_name}
-PREMIUM:  ₹{premium:,}
-SUM ASSURED: ₹{sum_assured:,}
-DUE IN:   {due_days} days
-TONE:     {tone}
-STRATEGY: {strategy}
-LANGUAGE: {language}
-
-{agent_context}
-"""
 
 
 # ── Agent ─────────────────────────────────────────────────────────────────────

@@ -83,10 +83,8 @@
 ```
 
 ---
-
----
-
 ## 🔵 RAG — Retrieval-Augmented Generation
+ 
 
 > **Every agent prompt is grounded in verified knowledge — no hallucinated policy terms, no made-up premium amounts.**
 

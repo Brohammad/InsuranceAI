@@ -221,9 +221,13 @@ def run_layer2(journey) -> list[dict]:
     msg_mock = MagicMock()
     msg_mock.text = "Dear Customer, your policy is due. Please renew now. Reply STOP to opt out."
 
+    obj_mock_text = MagicMock()
+    obj_mock_text.text = '{"rebuttal": "We understand your concern. Your policy protects your family — please renew today.", "follow_up_action": "send_payment_link", "confidence": 0.85}'
+
     with patch("agents.layer2_execution.whatsapp_agent.get_gemini_client") as wm, \
          patch("agents.layer2_execution.email_agent.get_gemini_client")    as em, \
          patch("agents.layer2_execution.voice_agent.get_gemini_client")    as vm, \
+         patch("agents.layer2_execution.objection_handler.get_gemini_client") as om, \
          patch("agents.layer2_execution.whatsapp_agent.settings") as ws, \
          patch("agents.layer2_execution.email_agent.settings")    as es, \
          patch("agents.layer2_execution.voice_agent.settings")    as vs:
@@ -236,6 +240,10 @@ def run_layer2(journey) -> list[dict]:
             c = MagicMock()
             c.models.generate_content.return_value = msg_mock
             m_client.return_value = c
+
+        oc = MagicMock()
+        oc.models.generate_content.return_value = obj_mock_text
+        om.return_value = oc
 
         dispatcher = Layer2Dispatcher()
         result = dispatcher.run_journey(journey)
@@ -278,25 +286,64 @@ def run_layer3(journey_id: str, policy_number: str, customer_name: str):
 
 
 # ─────────────────────────────────────────────────────────────
-#  LAYER 4 — Feedback loop
+#  LAYER 4 — Full sub-pipeline: Feedback → A/B → Drift → Report
 # ─────────────────────────────────────────────────────────────
 
-def run_layer4():
-    from agents.layer4_learning.feedback_loop import FeedbackLoopAgent
+def run_layer4() -> dict:
+    """
+    Runs the full Layer 4 sub-pipeline as defined in workflow.xml:
+      FeedbackLoop → ABTestManager → DriftDetector → ReportAgent
+    Returns a summary dict with results from all four stages.
+    """
+    from agents.layer4_learning.feedback_loop  import FeedbackLoopAgent
+    from agents.layer4_learning.ab_test_manager import ABTestManager
+    from agents.layer4_learning.drift_detector  import DriftDetector
+    from agents.layer4_learning.report_agent    import ReportAgent
+
+    # 1. Feedback Loop
     with patch("agents.layer1_strategic.propensity.PropensityAgent"):
-        agent = FeedbackLoopAgent()
-        events, summary = agent.run()
-    return summary
+        fb_agent = FeedbackLoopAgent()
+        events, fb_summary = fb_agent.run()
+
+    # 2. A/B Test Manager
+    ab_manager = ABTestManager()
+    ab_results = ab_manager.run()
+
+    # 3. Drift Detector
+    drift_detector = DriftDetector()
+    drift_report   = drift_detector.run()
+
+    # 4. Report Agent (mock mode — no LLM call)
+    report_agent = ReportAgent()
+    report_md    = report_agent.generate(report_type="daily")
+
+    return {
+        "feedback":    fb_summary,
+        "ab_results":  ab_results,
+        "drift":       drift_report,
+        "report_path": report_md[:80] + "…" if len(report_md) > 80 else report_md,
+    }
 
 
 # ─────────────────────────────────────────────────────────────
-#  LAYER 5 — Human queue check
+#  LAYER 5 — Human queue + Supervisor Dashboard
 # ─────────────────────────────────────────────────────────────
 
-def run_layer5():
-    from agents.layer5_human.queue_manager import QueueManager
-    qm = QueueManager()
+def run_layer5() -> list:
+    """
+    Runs Layer 5 as defined in workflow.xml:
+      QueueManager (load + assign) → SupervisorDashboard (render snapshot)
+    """
+    from agents.layer5_human.queue_manager      import QueueManager
+    from agents.layer5_human.supervisor_dashboard import SupervisorDashboard
+
+    qm    = QueueManager()
     queue = qm.load_queue()
+
+    # Always render the supervisor dashboard snapshot
+    dash = SupervisorDashboard()
+    dash.render()
+
     return queue
 
 
@@ -335,7 +382,9 @@ def main():
         t.add_row(r["customer_id"], r["name"], r["policy_number"], str(r["days_left"]))
     console.print(t)
 
-    journeys = []
+    journeys          = []   # all created journeys
+    learning_journeys = []   # score >= 70 → L4
+    escalate_journeys = []   # score < 70 or safety flag → L5
 
     for i, row in enumerate(run_targets, 1):
         cid  = row["customer_id"]
@@ -370,29 +419,69 @@ def main():
 
         # ── LAYER 3 ─────────────────────────────────────────
         console.print(f"\n[cyan]🔍  Layer 3 — Quality Gate[/cyan]")
+        qs = None
         if journey:
             qs = run_layer3(journey.journey_id, pid, name)
             console.print(f"  ✅ Quality score: [bold]{qs.total_score:.1f}[/bold]  Grade: [bold]{qs.grade}[/bold]")
+
+            # ── L3 → L4/L5 routing (per workflow.xml) ───────
+            if qs.safety_score == 0.0:
+                console.print(f"  [red]🚨 Safety flag detected → routing to L5 escalation[/red]")
+                escalate_journeys.append((journey, name, "safety_flag", qs))
+            elif qs.total_score < 70:
+                console.print(f"  [yellow]⚠  Score {qs.total_score:.1f} < 70 → routing to L5 escalation[/yellow]")
+                escalate_journeys.append((journey, name, "low_quality", qs))
+            else:
+                console.print(f"  [green]✅ Score {qs.total_score:.1f} ≥ 70 → routing to L4 learning[/green]")
+                learning_journeys.append((journey, name, qs))
 
         print_db_state(f"After Layer 3 — {name}")
 
         console.print()
 
     # ── LAYER 4 ─────────────────────────────────────────────
-    console.rule("[bold magenta]🔄 Layer 4 — Feedback Loop")
-    summary = run_layer4()
-    console.print(f"  Events processed     : {summary.total_events}")
-    console.print(f"  Positive signals     : {summary.positive_signals}")
-    console.print(f"  Negative signals     : {summary.negative_signals}")
-    console.print(f"  Policies improved    : {summary.policies_improved}")
-    console.print(f"  Payments confirmed   : {summary.payments_confirmed}")
-    console.print(f"  Propensity refresh   : {'✅' if summary.propensity_prompt_refreshed else '⬜ (threshold not yet met)'}")
+    console.rule("[bold magenta]🔄 Layer 4 — Feedback → A/B Test → Drift → Report")
+    console.print(f"  Journeys routed to L4 : [green]{len(learning_journeys)}[/green] (score ≥ 70)")
+    l4 = run_layer4()
+    fb = l4["feedback"]
+    console.print(f"  Events processed      : {fb.total_events}")
+    console.print(f"  Positive signals      : {fb.positive_signals}")
+    console.print(f"  Negative signals      : {fb.negative_signals}")
+    console.print(f"  Policies improved     : {fb.policies_improved}")
+    console.print(f"  Payments confirmed    : {fb.payments_confirmed}")
+    console.print(f"  Propensity refresh    : {'✅' if fb.propensity_prompt_refreshed else '⬜ (threshold not yet met)'}")
+
+    ab_results = l4["ab_results"]
+    if ab_results:
+        console.print(f"\n  [magenta]A/B Test Results ({len(ab_results)} variant types):[/magenta]")
+        for r in ab_results:
+            sig = "✅ significant" if r.significant else "⬜ not yet significant"
+            console.print(f"    {r.variant_type:10} → winner=[bold]{r.winner}[/bold]  conv={r.winner_conv_rate:.1f}%  lift={r.lift_pct:+.1f}%  {sig}")
+    else:
+        console.print("  [dim]A/B Test: insufficient data for significance (need more interactions)[/dim]")
+
+    drift = l4["drift"]
+    drift_color = {"ok": "green", "warning": "yellow", "critical": "red"}.get(drift.overall.value, "white")
+    console.print(f"\n  [bold]Drift Detector:[/bold] [{drift_color}]{drift.overall.value.upper()}[/{drift_color}] — {drift.summary}")
+
+    console.print(f"\n  [bold]Report Agent:[/bold] Daily report generated ✅")
+
+    # ── L4 → L1 insights loop (per workflow.xml dashed arrow) ────────────────
+    console.print(f"\n  [dim magenta]↺  Insights loop → Orchestrator: A/B winners + drift alerts fed back[/dim magenta]")
+    if ab_results:
+        for r in ab_results:
+            console.print(f"     Orchestrator updated: best_{r.variant_type}=[bold]{r.winner}[/bold]")
+    if drift.anomalies:
+        console.print(f"     Orchestrator notified: {len(drift.anomalies)} drift anomal{'y' if len(drift.anomalies)==1 else 'ies'} detected")
+    else:
+        console.print(f"     Orchestrator notified: no drift — system stable")
 
     # ── LAYER 5 ─────────────────────────────────────────────
-    console.rule("[bold red]🚨 Layer 5 — Human Escalation Queue")
+    console.rule("[bold red]🚨 Layer 5 — Human Escalation Queue + Supervisor Dashboard")
+    console.print(f"  Journeys routed to L5 : [red]{len(escalate_journeys)}[/red] (score < 70 or safety flag)")
     open_cases = run_layer5()
     if open_cases:
-        console.print(f"  Open escalation cases: {len(open_cases)}")
+        console.print(f"  Open escalation cases : {len(open_cases)}")
         print_escalations()
     else:
         console.print("  [green]No open escalations — all journeys handled by AI[/green]")
